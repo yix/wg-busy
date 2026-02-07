@@ -76,6 +76,52 @@
         .header-row h2 { margin-bottom: 0; }
         .btn-group { display: flex; gap: 0.5rem; }
         .exit-node-field { transition: max-height 0.2s, opacity 0.2s; overflow: hidden; }
+
+        /* Stats bar */
+        .stats-bar {
+            background: var(--pico-card-background-color);
+            border: 1px solid var(--pico-muted-border-color);
+            border-radius: var(--pico-border-radius);
+            padding: 0.5rem 1rem;
+            margin-bottom: 1rem;
+        }
+        .stats-bar-inner {
+            display: flex;
+            align-items: center;
+            gap: 1.5rem;
+            font-size: 0.9rem;
+        }
+        .status-dot {
+            display: inline-block;
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            margin-right: 0.25rem;
+        }
+        .status-up { background: #48bb78; }
+        .status-down { background: #e53e3e; }
+        .stats-status { white-space: nowrap; }
+        .stats-transfer { display: flex; gap: 1rem; white-space: nowrap; }
+        .stats-rx { color: #4a9eff; }
+        .stats-tx { color: #48bb78; }
+        .stats-sparkline { margin-left: auto; line-height: 0; }
+
+        /* Peer sparkline */
+        .peer-sparkline {
+            display: inline-block;
+            vertical-align: middle;
+            margin-left: 0.5rem;
+            line-height: 0;
+        }
+
+        /* QR button */
+        .qr-btn {
+            padding: 0.25rem 0.5rem !important;
+            line-height: 1;
+            display: inline-flex;
+            align-items: center;
+        }
+        .qr-btn svg { display: block; }
     </style>
 </head>
 <body>
@@ -84,6 +130,9 @@
             <h1>WG Busy</h1>
             <p>WireGuard Server Manager</p>
         </hgroup>
+
+        <div id="stats-bar" hx-get="/stats" hx-trigger="load, every 2s" hx-swap="outerHTML">
+        </div>
 
         <div class="tabs" role="tablist">
             <button role="tab" class="active"

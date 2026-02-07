@@ -12,6 +12,9 @@ var templates = template.Must(template.New("").Funcs(template.FuncMap{
 		}
 		return t.Format("2006-01-02")
 	},
+	"safeHTML": func(s string) template.HTML {
+		return template.HTML(s)
+	},
 }).Parse(`
 {{define "toast-success"}}
 <div class="toast toast-success" role="alert">{{.}}</div>
@@ -19,6 +22,21 @@ var templates = template.Must(template.New("").Funcs(template.FuncMap{
 
 {{define "toast-error"}}
 <div class="toast toast-error" role="alert">{{.}}</div>
+{{end}}
+
+{{define "stats-bar"}}
+<div id="stats-bar" class="stats-bar" hx-get="/stats" hx-trigger="every 2s" hx-swap="outerHTML">
+    <div class="stats-bar-inner">
+        <span class="stats-status">
+            {{if .IsUp}}<span class="status-dot status-up"></span> wg0 up {{.Uptime}}{{else}}<span class="status-dot status-down"></span> wg0 down{{end}}
+        </span>
+        <span class="stats-transfer">
+            <span class="stats-rx">&darr; {{.TotalRx}}</span>
+            <span class="stats-tx">&uarr; {{.TotalTx}}</span>
+        </span>
+        <span class="stats-sparkline">{{.SparklineSVG | safeHTML}}</span>
+    </div>
+</div>
 {{end}}
 
 {{define "peers-list"}}
@@ -45,9 +63,18 @@ var templates = template.Must(template.New("").Funcs(template.FuncMap{
             {{if .Peer.IsExitNode}}<span class="badge badge-exit">Exit Node</span>{{end}}
             {{if .ExitNodeName}}<span class="badge badge-via">via {{.ExitNodeName}}</span>{{end}}
         </strong>
-        <small>{{.Peer.AllowedIPs}} &middot; Created {{formatTime .Peer.CreatedAt}}</small>
+        <small>
+            {{.Peer.AllowedIPs}}
+            {{if .HasStats}} &middot; &darr;{{.TransferRx}} &uarr;{{.TransferTx}} &middot; shake {{.Handshake}}{{end}}
+            {{if not .HasStats}} &middot; Created {{formatTime .Peer.CreatedAt}}{{end}}
+            {{if .HasStats}} <span class="peer-sparkline">{{.SparklineSVG | safeHTML}}</span>{{end}}
+        </small>
     </div>
     <div class="peer-actions">
+        <button class="outline secondary qr-btn" title="QR Code"
+                hx-get="/peers/{{.Peer.ID}}/qr" hx-target="#modal-container" hx-swap="innerHTML">
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M0 0h7v7H0V0zm1 1v5h5V1H1zm1 1h3v3H2V2zm8-2h7v7H10V0zm1 1v5h5V1h-5zm1 1h3v3h-3V2zM0 10h7v6H0v-6zm1 1v4h5v-4H1zm1 1h3v2H2v-2zm8-2h2v2h-2v-2zm3 0h3v2h-3v-2zm-3 3h2v3h-2v-3zm3 0h1v1h-1v-1zm2 0h1v3h-1v-3zm-2 2h1v1h-1v-1z"/></svg>
+        </button>
         <a href="/api/peers/{{.Peer.ID}}/config" download role="button" class="outline secondary">Download</a>
         <button class="outline" hx-get="/peers/{{.Peer.ID}}/edit" hx-target="#modal-container" hx-swap="innerHTML">Edit</button>
         <button class="outline secondary"
@@ -65,6 +92,25 @@ var templates = template.Must(template.New("").Funcs(template.FuncMap{
         </button>
     </div>
 </div>
+{{end}}
+
+{{define "qr-modal"}}
+<dialog>
+    <article>
+        <header>
+            <button aria-label="Close" rel="prev" onclick="closeModal()"></button>
+            <p><strong>QR Code &mdash; {{.Name}}</strong></p>
+        </header>
+        <div style="text-align:center">
+            <img src="/api/peers/{{.ID}}/qr" alt="QR Code for {{.Name}}" width="256" height="256"
+                 style="image-rendering:pixelated">
+            <p><small>Scan with the WireGuard mobile app to import this peer configuration.</small></p>
+        </div>
+        <footer>
+            <button type="button" onclick="closeModal()">Close</button>
+        </footer>
+    </article>
+</dialog>
 {{end}}
 
 {{define "peer-form"}}

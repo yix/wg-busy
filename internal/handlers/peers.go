@@ -12,13 +12,19 @@ import (
 	"github.com/yix/wg-busy/internal/ipam"
 	"github.com/yix/wg-busy/internal/models"
 	"github.com/yix/wg-busy/internal/routing"
+	"github.com/yix/wg-busy/internal/wgstats"
 	"github.com/yix/wg-busy/internal/wireguard"
 )
 
 // peerRowData is the template data for a single peer row.
 type peerRowData struct {
-	Peer         models.Peer
-	ExitNodeName string
+	Peer            models.Peer
+	ExitNodeName    string
+	TransferRx      string
+	TransferTx      string
+	Handshake       string
+	SparklineSVG    string
+	HasStats        bool
 }
 
 // peersListData is the template data for the peers list.
@@ -42,6 +48,12 @@ func (h *handler) buildPeersListData() peersListData {
 		cfg = c
 	})
 
+	// Fetch peer stats if available.
+	var allPeerStats map[string]wgstats.PeerStats
+	if h.stats != nil {
+		allPeerStats = h.stats.GetAllPeerStats()
+	}
+
 	exitNodeNames := make(map[string]string)
 	for _, p := range cfg.Peers {
 		if p.IsExitNode {
@@ -54,6 +66,20 @@ func (h *handler) buildPeersListData() peersListData {
 		if p.ExitNodeID != "" {
 			row.ExitNodeName = exitNodeNames[p.ExitNodeID]
 		}
+
+		// Attach stats by public key.
+		if allPeerStats != nil {
+			if ps, ok := allPeerStats[p.PublicKey]; ok {
+				row.HasStats = true
+				row.TransferRx = wgstats.FormatBytes(ps.TransferRx)
+				row.TransferTx = wgstats.FormatBytes(ps.TransferTx)
+				row.Handshake = wgstats.FormatHandshake(ps.LatestHandshake)
+				if h.stats != nil {
+					row.SparklineSVG = wgstats.RenderSparklineSVG(h.stats.GetPeerHistory(p.PublicKey), 80, 16)
+				}
+			}
+		}
+
 		data.Peers = append(data.Peers, row)
 	}
 	return data
@@ -351,6 +377,18 @@ func (h *handler) TogglePeer(w http.ResponseWriter, r *http.Request) {
 	}
 
 	data := peerRowData{Peer: peer, ExitNodeName: exitNodeName}
+
+	// Attach stats if available.
+	if h.stats != nil {
+		if ps := h.stats.GetPeerStats(peer.PublicKey); ps != nil {
+			data.HasStats = true
+			data.TransferRx = wgstats.FormatBytes(ps.TransferRx)
+			data.TransferTx = wgstats.FormatBytes(ps.TransferTx)
+			data.Handshake = wgstats.FormatHandshake(ps.LatestHandshake)
+			data.SparklineSVG = wgstats.RenderSparklineSVG(h.stats.GetPeerHistory(peer.PublicKey), 80, 16)
+		}
+	}
+
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	if err := templates.ExecuteTemplate(w, "peer-row", data); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)

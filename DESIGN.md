@@ -42,7 +42,7 @@ WireGuard server management web UI. Go backend serving a single HTML page using 
 
 ```
 wg-busy/
-├── main.go                       # Entrypoint, embed.FS, CLI flags, HTTP server
+├── main.go                       # Entrypoint, embed.FS, CLI flags, HTTP server, auto-start WG
 ├── go.mod                        # github.com/yix/wg-busy
 ├── internal/
 │   ├── models/models.go          # Data structures + validation
@@ -50,12 +50,14 @@ wg-busy/
 │   ├── wireguard/wireguard.go    # Key generation, .conf rendering
 │   ├── ipam/ipam.go              # IP address allocation
 │   ├── routing/routing.go        # Exit node policy routing command generation
+│   ├── wgstats/wgstats.go       # Background stats collector (wg show polling, ring buffer)
 │   └── handlers/
 │       ├── handlers.go           # Router, handler struct
 │       ├── templates.go          # html/template definitions
 │       ├── peers.go              # Peer CRUD (HTML fragments)
 │       ├── server.go             # Server config (HTML fragments)
-│       └── export.go             # Download/apply config
+│       ├── export.go             # Download/apply config
+│       └── stats.go              # Stats bar + QR code handlers
 ├── web/
 │   └── index.html                # Single page: htmx + pico.css (CDN)
 ├── Dockerfile                    # Multi-stage: build + alpine runtime
@@ -346,6 +348,205 @@ Stage 2: alpine:3.20         → runtime with wireguard-tools, iptables, iproute
 -wg-config   /etc/wireguard/wg0.conf        WireGuard config output path
 ```
 
+## WireGuard Auto-Start
+
+On startup, `main.go` runs `wg-quick up wg0` to bring the WireGuard interface up automatically. This ensures the VPN is running when the Docker container starts. The startup sequence:
+
+1. Load config, generate server keys if needed
+2. Render wg0.conf to disk
+3. Run `wg-quick up wg0` (log errors but don't fatal — wg0 may already be up)
+4. Start stats collector goroutine
+5. Start HTTP server
+
+## Stats Collection (`internal/wgstats/wgstats.go`)
+
+Background goroutine that polls `wg show wg0 dump` every 2 seconds to collect interface and per-peer statistics.
+
+### Data Source
+
+`wg show wg0 dump` produces tab-separated output:
+- Line 1 (interface): `private-key \t public-key \t listen-port \t fwmark`
+- Lines 2+ (peers): `public-key \t preshared-key \t endpoint \t allowed-ips \t latest-handshake \t transfer-rx \t transfer-tx \t persistent-keepalive`
+
+### Architecture
+
+```go
+type Collector struct {
+    mu          sync.RWMutex
+    startedAt   time.Time               // when WireGuard was started (for uptime)
+    iface       InterfaceStats           // aggregate interface stats
+    peers       map[string]*PeerStats    // keyed by public key
+    history     []HistoryPoint           // ring buffer, ~60 samples (2min at 2s intervals)
+    peerHistory map[string][]HistoryPoint // per-peer bandwidth history
+}
+
+type InterfaceStats struct {
+    TotalRx     int64   // cumulative bytes received
+    TotalTx     int64   // cumulative bytes sent
+    CurrentRxPS float64 // bytes/sec receive (computed from delta)
+    CurrentTxPS float64 // bytes/sec transmit
+}
+
+type PeerStats struct {
+    PublicKey       string
+    Endpoint        string
+    LatestHandshake time.Time
+    TransferRx      int64
+    TransferTx      int64
+    CurrentRxPS     float64
+    CurrentTxPS     float64
+}
+
+type HistoryPoint struct {
+    Time time.Time
+    RxPS float64  // bytes/sec
+    TxPS float64
+}
+```
+
+### Sparkline SVG Rendering
+
+Server-side SVG generation for inline sparkline graphs:
+- `RenderSparklineSVG(history []HistoryPoint, width, height int) string`
+- Returns `<svg>` element with `<polyline>` for Rx (blue) and Tx (green)
+- Dimensions: 120×24 px for stats bar, 80×16 px for peer rows
+- Auto-scales Y axis to max value in window
+
+### Thread Safety
+
+`Collector` uses `sync.RWMutex`. Read methods called by HTTP handlers, write by the polling goroutine.
+
+## QR Code Generation
+
+Each peer's client config can be displayed as a QR code for mobile WireGuard client scanning.
+
+### Endpoint
+
+```
+GET /api/peers/{id}/qr → PNG image (256×256, QR code of client .conf content)
+```
+
+### Implementation
+
+- Library: `github.com/skip2/go-qrcode`
+- Content: full client `.conf` text (same as download)
+- Size: 256×256 pixels, Medium error correction
+- Response: `image/png` content type
+
+### UI
+
+QR glyph button appears to the left of the "Download" button in each peer row. Clicking opens a modal `<dialog>` with the QR code image loaded via htmx.
+
+## Stats Bar
+
+A stats bar appears above the tab navigation showing server-level WireGuard statistics.
+
+### Layout
+
+```
+┌──────────────────────────────────────────────────────┐
+│  ● wg0 up 2h 15m  │  ↓ 1.2 GB  ↑ 340 MB  │ ▁▃▅▂▇▃ │
+└──────────────────────────────────────────────────────┘
+```
+
+- **Status indicator**: green dot when wg0 is up, interface name, uptime
+- **Transfer counters**: cumulative Rx/Tx with human-readable formatting
+- **Sparkline graph**: bandwidth over last ~2 minutes (Rx + Tx overlaid)
+
+### Endpoint
+
+```
+GET /stats → stats bar HTML fragment (polled every 2s via htmx hx-trigger="every 2s")
+```
+
+### Template Data
+
+```go
+type StatsBarData struct {
+    IsUp        bool
+    Uptime      string   // "2h 15m"
+    TotalRx     string   // "1.2 GB"
+    TotalTx     string   // "340 MB"
+    SparklineSVG string  // inline <svg> element
+}
+```
+
+## Per-Peer Stats
+
+Each peer row displays inline stats without adding vertical space — stats appear in the existing `<small>` info line.
+
+### Layout
+
+```
+┌──────────────────────────────────────────────────────────────────┐
+│ Alice Laptop [Exit Node]                                        │
+│ 10.0.0.2/32 · ↓ 45 MB ↑ 12 MB · shake 2m ago · ▁▃▅▂  [QR][DL]│
+└──────────────────────────────────────────────────────────────────┘
+```
+
+- Transfer Rx/Tx counters
+- Latest handshake relative time ("2m ago", "never")
+- Mini sparkline SVG (80×16 px)
+- All inline in the existing peer row info section
+
+### Data Flow
+
+1. `ListPeers` handler reads stats from `Collector`
+2. Stats matched to peers by public key
+3. `peerRowData` extended with stats fields
+4. Template renders inline stats in `<small>` element
+
+## API Endpoints (Updated)
+
+### HTML Fragment Endpoints (htmx swap targets)
+
+```
+GET  /                          → index.html (full page, initial load only)
+GET  /peers                     → peers list fragment (with exit node badges + stats)
+GET  /peers/new                 → create peer <dialog> form (with exit node options)
+GET  /peers/{id}/edit           → edit peer <dialog> form
+POST /peers                     → create peer → return updated list
+PUT  /peers/{id}                → update peer → return updated list
+DELETE /peers/{id}              → delete peer (cascade) → empty
+PUT  /peers/{id}/toggle         → toggle enabled (cascade if exit node) → updated row
+
+GET  /server                    → server config form fragment
+PUT  /server                    → update config → return form + success toast
+
+GET  /stats                     → stats bar HTML fragment (polled every 2s)
+```
+
+### File/Action Endpoints
+
+```
+GET  /api/peers/{id}/config             → download client .conf
+GET  /api/peers/{id}/qr                 → QR code PNG of client .conf
+GET  /api/server/config                 → download wg0.conf (with routing rules)
+POST /api/server/apply                  → wg-quick down/up
+POST /api/peers/{id}/regenerate-keys    → new keypair → return updated form
+```
+
+## UI Layout (Updated)
+
+```
+┌──────────────────────────────────────────┐
+│  WG Busy — WireGuard Server Manager      │
+├──────────────────────────────────────────┤
+│  ┌── #stats-bar (hx-trigger every 2s) ┐ │
+│  │ ● wg0 up 2h 15m │ ↓1.2GB ↑340MB │▁▃│ │
+│  └────────────────────────────────────┘ │
+├──────────────┬───────────────────────────┤
+│ [Peers]      │ [Server]                  │
+├──────────────┴───────────────────────────┤
+│  ┌── #tab-content ─────────────────────┐ │
+│  │  (Peers list OR Server config)      │ │
+│  └─────────────────────────────────────┘ │
+│  ┌── #modal-container ─────────────────┐ │
+│  │  (<dialog> for peer form / QR code) │ │
+│  └─────────────────────────────────────┘ │
+└──────────────────────────────────────────┘
+```
+
 ## Key Technical Decisions
 
 - **YAML config** as source of truth, rendered to .conf on every save
@@ -354,3 +555,8 @@ Stage 2: alpine:3.20         → runtime with wireguard-tools, iptables, iproute
 - **Exit node AllowedIPs override** — YAML keeps /32, wg0.conf gets 0.0.0.0/0
 - **Cascade on exit node removal** — clears all ExitNodeID references
 - **CDN for htmx/pico.css**, **Go 1.22+ ServeMux**, **wgtypes for keys**, **stateless IPAM**
+- **WireGuard auto-start** on Docker container startup via `wg-quick up wg0`
+- **Background stats polling** via `wg show wg0 dump` every 2s with ring buffer
+- **Server-side SVG sparklines** — no client-side JS charting needed
+- **QR codes** via `github.com/skip2/go-qrcode` — PNG endpoint consumed by `<img>` tag
+- **Per-peer stats** matched by public key, rendered inline without extra vertical space

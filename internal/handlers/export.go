@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"os/exec"
 	"strings"
+	"time"
 
 	"github.com/yix/wg-busy/internal/models"
 	"github.com/yix/wg-busy/internal/routing"
@@ -88,6 +89,11 @@ func (h *handler) ApplyConfig(w http.ResponseWriter, r *http.Request) {
 		msg := fmt.Sprintf("Failed to apply config: %v\n%s", err, string(output))
 		templates.ExecuteTemplate(w, "toast-error", msg)
 		return
+	}
+
+	// Reset uptime tracking on successful restart.
+	if h.stats != nil {
+		h.stats.SetStartedAt(time.Now())
 	}
 
 	templates.ExecuteTemplate(w, "toast-success", "WireGuard configuration applied successfully.")
