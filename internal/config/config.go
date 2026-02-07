@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"sync"
@@ -72,6 +73,10 @@ func (s *Store) Write(fn func(cfg *models.AppConfig) error) error {
 
 	if err := s.renderWGConfig(); err != nil {
 		return fmt.Errorf("rendering wg config: %w", err)
+	}
+
+	if err := wireguard.ReloadWGConfig(); err != nil {
+		log.Printf("reloading wg server: %v", err)
 	}
 
 	return nil

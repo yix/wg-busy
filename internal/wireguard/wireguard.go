@@ -2,6 +2,7 @@ package wireguard
 
 import (
 	"fmt"
+	"os/exec"
 	"strings"
 	"text/template"
 
@@ -9,6 +10,16 @@ import (
 
 	"github.com/yix/wg-busy/internal/models"
 )
+
+// Gracefully reload WireGuard server configuration
+func ReloadWGConfig() error {
+	cmd := exec.Command("sh", "-c", "wg syncconf wg0 <(wg-quick strip wg0)")
+	_, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("failed to reload config: %v", err)
+	}
+	return nil
+}
 
 // GenerateKeyPair generates a WireGuard private key and derives the public key.
 func GenerateKeyPair() (privateKey, publicKey string, err error) {
@@ -40,9 +51,9 @@ func PublicKeyFromPrivate(privateKeyBase64 string) (string, error) {
 
 // serverConfData is the data passed to the server config template.
 type serverConfData struct {
-	Server          models.ServerConfig
-	EnabledPeers    []peerConfData
-	PostUpCommands  []string
+	Server           models.ServerConfig
+	EnabledPeers     []peerConfData
+	PostUpCommands   []string
 	PostDownCommands []string
 }
 

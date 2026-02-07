@@ -1,7 +1,7 @@
 services:
   wg-busy:
     build: .
-    image: wg-busy:v0.0.1
+    image: wg-busy:v0.0.3
     container_name: wg-busy
     security_opt:
       - systempaths=unconfined
