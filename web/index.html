@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>WG Busy - WireGuard Manager</title>
+    <link rel="stylesheet" href="https://unpkg.com/@picocss/pico@2/css/pico.min.css">
+    <script src="https://unpkg.com/htmx.org@2.0.4"></script>
+    <style>
+        .tabs {
+            display: flex;
+            border-bottom: 2px solid var(--pico-muted-border-color);
+            margin-bottom: 1.5rem;
+        }
+        .tabs button {
+            background: none;
+            border: none;
+            padding: 0.75rem 1.5rem;
+            cursor: pointer;
+            border-bottom: 3px solid transparent;
+            margin-bottom: -2px;
+            color: var(--pico-muted-color);
+            font-size: 1rem;
+        }
+        .tabs button.active {
+            border-bottom-color: var(--pico-primary);
+            color: var(--pico-color);
+            font-weight: bold;
+        }
+        .peer-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 0.75rem 0;
+            border-bottom: 1px solid var(--pico-muted-border-color);
+        }
+        .peer-row:last-child { border-bottom: none; }
+        .peer-info { flex: 1; }
+        .peer-info strong { display: block; }
+        .peer-info small { color: var(--pico-muted-color); }
+        .peer-actions { display: flex; gap: 0.5rem; align-items: center; }
+        .peer-actions button, .peer-actions a {
+            padding: 0.25rem 0.75rem;
+            font-size: 0.85rem;
+            margin-bottom: 0;
+        }
+        .peer-disabled { opacity: 0.5; }
+        .badge {
+            display: inline-block;
+            padding: 0.1rem 0.5rem;
+            border-radius: 1rem;
+            font-size: 0.75rem;
+            font-weight: bold;
+            margin-left: 0.5rem;
+            vertical-align: middle;
+        }
+        .badge-exit { background: var(--pico-primary-background); color: var(--pico-primary-inverse); }
+        .badge-via { background: var(--pico-muted-border-color); color: var(--pico-muted-color); }
+        .toast {
+            padding: 0.75rem 1rem;
+            border-radius: var(--pico-border-radius);
+            margin-bottom: 1rem;
+        }
+        .toast-success { background: #d4edda; color: #155724; }
+        .toast-error { background: #f8d7da; color: #721c24; }
+        dialog::backdrop { background: rgba(0,0,0,0.5); }
+        .peer-row.htmx-swapping { opacity: 0; transition: opacity 0.3s ease-out; }
+        [aria-invalid="true"] { border-color: var(--pico-del-color) !important; }
+        .field-error { color: var(--pico-del-color); font-size: 0.85rem; display: block; margin-top: 0.25rem; }
+        .header-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 1rem;
+        }
+        .header-row h2 { margin-bottom: 0; }
+        .btn-group { display: flex; gap: 0.5rem; }
+        .exit-node-field { transition: max-height 0.2s, opacity 0.2s; overflow: hidden; }
+    </style>
+</head>
+<body>
+    <main class="container">
+        <hgroup>
+            <h1>WG Busy</h1>
+            <p>WireGuard Server Manager</p>
+        </hgroup>
+
+        <div class="tabs" role="tablist">
+            <button role="tab" class="active"
+                    hx-get="/peers" hx-target="#tab-content" hx-swap="innerHTML"
+                    onclick="selectTab(this)">
+                Peers
+            </button>
+            <button role="tab"
+                    hx-get="/server" hx-target="#tab-content" hx-swap="innerHTML"
+                    onclick="selectTab(this)">
+                Server
+            </button>
+        </div>
+
+        <div id="tab-content"
+             hx-get="/peers" hx-trigger="load" hx-swap="innerHTML">
+        </div>
+
+        <div id="modal-container"></div>
+    </main>
+
+    <script>
+        function selectTab(btn) {
+            document.querySelectorAll('.tabs button').forEach(function(b) {
+                b.classList.remove('active');
+            });
+            btn.classList.add('active');
+        }
+
+        document.body.addEventListener('htmx:afterSwap', function(evt) {
+            if (evt.detail.target.id === 'modal-container') {
+                var dialog = evt.detail.target.querySelector('dialog');
+                if (dialog && !dialog.open) {
+                    dialog.showModal();
+                }
+            }
+        });
+
+        function closeModal() {
+            var container = document.getElementById('modal-container');
+            var dialog = container.querySelector('dialog');
+            if (dialog) {
+                dialog.close();
+            }
+            container.innerHTML = '';
+        }
+
+        function toggleExitNodeFields(checkbox) {
+            var routeVia = document.getElementById('route-via-field');
+            if (routeVia) {
+                routeVia.style.display = checkbox.checked ? 'none' : '';
+            }
+        }
+
+        function isValidCIDRList(s) {
+            return s.split(',').every(function(part) {
+                var cidr = part.trim();
+                return /^(\d{1,3}\.){3}\d{1,3}\/\d{1,2}$/.test(cidr) ||
+                       /^[0-9a-fA-F:]+\/\d{1,3}$/.test(cidr);
+            });
+        }
+
+        function isValidPort(s) {
+            var n = parseInt(s, 10);
+            return !isNaN(n) && n >= 1 && n <= 65535;
+        }
+
+        function setInvalid(el, msg) {
+            el.setAttribute('aria-invalid', 'true');
+            var err = el.parentNode.querySelector('.field-error');
+            if (!err) {
+                err = document.createElement('small');
+                err.className = 'field-error';
+                el.parentNode.appendChild(err);
+            }
+            err.textContent = msg;
+        }
+
+        function clearInvalid(el) {
+            el.removeAttribute('aria-invalid');
+            var err = el.parentNode.querySelector('.field-error');
+            if (err) err.remove();
+        }
+
+        function validatePeerForm(evt) {
+            var form = evt.target;
+            var valid = true;
+            var name = form.querySelector('[name="name"]');
+            if (name && !name.value.trim()) {
+                setInvalid(name, 'Name is required');
+                valid = false;
+            } else if (name) {
+                clearInvalid(name);
+            }
+            var aip = form.querySelector('[name="allowedIPs"]');
+            if (aip && aip.value.trim() && !isValidCIDRList(aip.value)) {
+                setInvalid(aip, 'Must be valid CIDR notation');
+                valid = false;
+            } else if (aip) {
+                clearInvalid(aip);
+            }
+            if (!valid) {
+                evt.preventDefault();
+            }
+        }
+
+        function validateServerForm(evt) {
+            var form = evt.target;
+            var valid = true;
+            var port = form.querySelector('[name="listenPort"]');
+            if (port && !isValidPort(port.value)) {
+                setInvalid(port, 'Must be 1-65535');
+                valid = false;
+            } else if (port) {
+                clearInvalid(port);
+            }
+            var addr = form.querySelector('[name="address"]');
+            if (addr && !addr.value.trim()) {
+                setInvalid(addr, 'Address is required');
+                valid = false;
+            } else if (addr && !isValidCIDRList(addr.value)) {
+                setInvalid(addr, 'Must be valid CIDR');
+                valid = false;
+            } else if (addr) {
+                clearInvalid(addr);
+            }
+            if (!valid) {
+                evt.preventDefault();
+            }
+        }
+    </script>
+</body>
+</html>
