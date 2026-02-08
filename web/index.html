@@ -234,20 +234,20 @@
             <p>WireGuard Server Manager</p>
         </hgroup>
 
-        <div id="stats-bar" hx-get="/stats" hx-trigger="load, every 2s" hx-swap="outerHTML">
+        <div id="stats-bar" hx-get="stats" hx-trigger="load, every 2s" hx-swap="outerHTML">
         </div>
 
         <div class="tabs" role="tablist">
-            <button role="tab" class="active" hx-get="/peers" hx-target="#tab-content" hx-swap="innerHTML"
+            <button role="tab" class="active" hx-get="peers" hx-target="#tab-content" hx-swap="innerHTML"
                 onclick="selectTab(this)">
                 Peers
             </button>
-            <button role="tab" hx-get="/server" hx-target="#tab-content" hx-swap="innerHTML" onclick="selectTab(this)">
+            <button role="tab" hx-get="server" hx-target="#tab-content" hx-swap="innerHTML" onclick="selectTab(this)">
                 Server
             </button>
         </div>
 
-        <div id="tab-content" hx-get="/peers" hx-trigger="load" hx-swap="innerHTML">
+        <div id="tab-content" hx-get="peers" hx-trigger="load" hx-swap="innerHTML">
         </div>
 
         <div id="modal-container"></div>

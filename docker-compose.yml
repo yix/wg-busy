@@ -16,7 +16,7 @@ services:
       - "8080:8080" # Web UI
       - "51820:51820/udp" # WireGuard
     volumes:
-      - ./data:/app/data # config.yaml persistence
+      - $PWD/data:/app/data # config.yaml persistence
       - /lib/modules:/lib/modules:ro # kernel modules for wireguard
     environment:
       - WG_BUSY_LISTEN=:8080

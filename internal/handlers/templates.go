@@ -25,7 +25,7 @@ var templates = template.Must(template.New("").Funcs(template.FuncMap{
 {{end}}
 
 {{define "stats-bar"}}
-<div id="stats-bar" class="stats-bar" hx-get="/stats" hx-trigger="every 2s" hx-swap="outerHTML">
+<div id="stats-bar" class="stats-bar" hx-get="stats" hx-trigger="every 2s" hx-swap="outerHTML">
     <div class="stats-bar-inner">
         <span class="stats-status">
             {{if .IsUp}}<span class="status-dot status-up"></span> wg0 up {{.Uptime}}{{else}}<span class="status-dot status-down"></span> wg0 down{{end}}
@@ -40,10 +40,10 @@ var templates = template.Must(template.New("").Funcs(template.FuncMap{
 {{end}}
 
 {{define "peers-list"}}
-<div id="peers-list" hx-get="/peers/stats" hx-trigger="every 2s" hx-swap="none">
+<div id="peers-list" hx-get="peers/stats" hx-trigger="every 2s" hx-swap="none">
     <div class="header-row">
         <h2>Peers ({{len .Peers}})</h2>
-        <button hx-get="/peers/new" hx-target="#modal-container" hx-swap="innerHTML">+ Add Peer</button>
+        <button hx-get="peers/new" hx-target="#modal-container" hx-swap="innerHTML">+ Add Peer</button>
     </div>
     {{if not .Peers}}
     <p>No peers configured. Add one to get started.</p>
@@ -69,19 +69,19 @@ var templates = template.Must(template.New("").Funcs(template.FuncMap{
     </div>
     <div class="peer-actions">
         <button class="outline secondary qr-btn" title="QR Code"
-                hx-get="/peers/{{.Peer.ID}}/qr" hx-target="#modal-container" hx-swap="innerHTML">
+                hx-get="peers/{{.Peer.ID}}/qr" hx-target="#modal-container" hx-swap="innerHTML">
             <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M0 0h7v7H0V0zm1 1v5h5V1H1zm1 1h3v3H2V2zm8-2h7v7H10V0zm1 1v5h5V1h-5zm1 1h3v3h-3V2zM0 10h7v6H0v-6zm1 1v4h5v-4H1zm1 1h3v2H2v-2zm8-2h2v2h-2v-2zm3 0h3v2h-3v-2zm-3 3h2v3h-2v-3zm3 0h1v1h-1v-1zm2 0h1v1h-1v-1zm2 0h1v3h-1v-3zm-2 2h1v1h-1v-1z"/></svg>
         </button>
-        <a href="/api/peers/{{.Peer.ID}}/config" download role="button" class="outline secondary">Download</a>
-        <button class="outline" hx-get="/peers/{{.Peer.ID}}/edit" hx-target="#modal-container" hx-swap="innerHTML">Edit</button>
+        <a href="api/peers/{{.Peer.ID}}/config" download role="button" class="outline secondary">Download</a>
+        <button class="outline" hx-get="peers/{{.Peer.ID}}/edit" hx-target="#modal-container" hx-swap="innerHTML">Edit</button>
         <button class="outline secondary"
-                hx-put="/peers/{{.Peer.ID}}/toggle"
+                hx-put="peers/{{.Peer.ID}}/toggle"
                 hx-target="#peer-{{.Peer.ID}}"
                 hx-swap="outerHTML">
             {{if .Peer.Enabled}}Disable{{else}}Enable{{end}}
         </button>
         <button class="outline" style="color:var(--pico-del-color);border-color:var(--pico-del-color)"
-                hx-delete="/peers/{{.Peer.ID}}"
+                hx-delete="peers/{{.Peer.ID}}"
                 hx-target="#tab-content"
                 hx-swap="innerHTML"
                 hx-confirm="Delete peer {{.Peer.Name}}?">
@@ -112,7 +112,7 @@ var templates = template.Must(template.New("").Funcs(template.FuncMap{
             <p><strong>QR Code &mdash; {{.Name}}</strong></p>
         </header>
         <div style="text-align:center">
-            <img src="/api/peers/{{.ID}}/qr" alt="QR Code for {{.Name}}" width="256" height="256"
+            <img src="api/peers/{{.ID}}/qr" alt="QR Code for {{.Name}}" width="256" height="256"
                  style="image-rendering:pixelated">
             <p><small>Scan with the WireGuard mobile app to import this peer configuration.</small></p>
         </div>
@@ -130,7 +130,7 @@ var templates = template.Must(template.New("").Funcs(template.FuncMap{
             <button aria-label="Close" rel="prev" onclick="closeModal()"></button>
             <p><strong>{{if .IsNew}}Add Peer{{else}}Edit Peer{{end}}</strong></p>
         </header>
-        <form {{if .IsNew}}hx-post="/peers"{{else}}hx-put="/peers/{{.Peer.ID}}"{{end}}
+        <form {{if .IsNew}}hx-post="peers"{{else}}hx-put="peers/{{.Peer.ID}}"{{end}}
               hx-target="#tab-content" hx-swap="innerHTML"
               onsubmit="validatePeerForm(event)">
 
@@ -224,8 +224,8 @@ var templates = template.Must(template.New("").Funcs(template.FuncMap{
     <div class="header-row">
         <h2>Server Configuration</h2>
         <div class="btn-group">
-            <a href="/api/server/config" download role="button" class="outline secondary">Download wg0.conf</a>
-            <button hx-post="/api/server/apply" hx-target="#apply-result" hx-swap="innerHTML"
+            <a href="api/server/config" download role="button" class="outline secondary">Download wg0.conf</a>
+            <button hx-post="api/server/apply" hx-target="#apply-result" hx-swap="innerHTML"
                     hx-confirm="Apply configuration? This will restart the WireGuard interface.">
                 Apply Config
             </button>
@@ -237,7 +237,7 @@ var templates = template.Must(template.New("").Funcs(template.FuncMap{
     {{if .Success}}<div class="toast toast-success">{{.Success}}</div>{{end}}
     {{if .Error}}<div class="toast toast-error">{{.Error}}</div>{{end}}
 
-    <form hx-put="/server" hx-target="#tab-content" hx-swap="innerHTML"
+    <form hx-put="server" hx-target="#tab-content" hx-swap="innerHTML"
           onsubmit="validateServerForm(event)">
 
         <div class="grid">
