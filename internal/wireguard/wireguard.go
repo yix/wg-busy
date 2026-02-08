@@ -12,7 +12,15 @@ import (
 )
 
 // Gracefully reload WireGuard server configuration
+// ReloadWGConfig gracefully reloads WireGuard server configuration.
+// It checks if the interface exists before attempting reload to avoid errors during startup.
 func ReloadWGConfig() error {
+	// Check if interface exists
+	if err := exec.Command("ip", "link", "show", "wg0").Run(); err != nil {
+		// Interface doesn't exist (e.g. during startup), skip reload
+		return nil
+	}
+
 	cmd := exec.Command("sh", "-c", "wg syncconf wg0 <(wg-quick strip wg0)")
 	_, err := cmd.CombinedOutput()
 	if err != nil {
