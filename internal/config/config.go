@@ -35,6 +35,8 @@ func Load(configPath, wgConfigPath string) (*Store, error) {
 			Server: models.ServerConfig{
 				ListenPort: 51820,
 				Address:    "10.0.0.1/24",
+				PostUp:     "iptables -A POSTROUTING -t nat -o eth0 -j MASQUERADE",
+				PostDown:   "iptables -D POSTROUTING -t nat -o eth0 -j MASQUERADE",
 			},
 			Peers: []models.Peer{},
 		}
