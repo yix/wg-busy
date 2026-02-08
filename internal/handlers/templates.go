@@ -40,7 +40,7 @@ var templates = template.Must(template.New("").Funcs(template.FuncMap{
 {{end}}
 
 {{define "peers-list"}}
-<div id="peers-list">
+<div id="peers-list" hx-get="/peers/stats" hx-trigger="every 2s" hx-swap="none">
     <div class="header-row">
         <h2>Peers ({{len .Peers}})</h2>
         <button hx-get="/peers/new" hx-target="#modal-container" hx-swap="innerHTML">+ Add Peer</button>
@@ -63,17 +63,14 @@ var templates = template.Must(template.New("").Funcs(template.FuncMap{
             {{if .Peer.IsExitNode}}<span class="badge badge-exit">Exit Node</span>{{end}}
             {{if .ExitNodeName}}<span class="badge badge-via">via {{.ExitNodeName}}</span>{{end}}
         </strong>
-        <small>
-            {{.Peer.AllowedIPs}}
-            {{if .HasStats}} &middot; &darr;{{.TransferRx}} &uarr;{{.TransferTx}} &middot; shake {{.Handshake}}{{end}}
-            {{if not .HasStats}} &middot; Created {{formatTime .Peer.CreatedAt}}{{end}}
-            {{if .HasStats}} <span class="peer-sparkline">{{.SparklineSVG | safeHTML}}</span>{{end}}
+        <small id="peer-stats-{{.Peer.ID}}">
+           {{template "peer-stats" .}}
         </small>
     </div>
     <div class="peer-actions">
         <button class="outline secondary qr-btn" title="QR Code"
                 hx-get="/peers/{{.Peer.ID}}/qr" hx-target="#modal-container" hx-swap="innerHTML">
-            <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M0 0h7v7H0V0zm1 1v5h5V1H1zm1 1h3v3H2V2zm8-2h7v7H10V0zm1 1v5h5V1h-5zm1 1h3v3h-3V2zM0 10h7v6H0v-6zm1 1v4h5v-4H1zm1 1h3v2H2v-2zm8-2h2v2h-2v-2zm3 0h3v2h-3v-2zm-3 3h2v3h-2v-3zm3 0h1v1h-1v-1zm2 0h1v3h-1v-3zm-2 2h1v1h-1v-1z"/></svg>
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M0 0h7v7H0V0zm1 1v5h5V1H1zm1 1h3v3H2V2zm8-2h7v7H10V0zm1 1v5h5V1h-5zm1 1h3v3h-3V2zM0 10h7v6H0v-6zm1 1v4h5v-4H1zm1 1h3v2H2v-2zm8-2h2v2h-2v-2zm3 0h3v2h-3v-2zm-3 3h2v3h-2v-3zm3 0h1v1h-1v-1zm2 0h1v1h-1v-1zm2 0h1v3h-1v-3zm-2 2h1v1h-1v-1z"/></svg>
         </button>
         <a href="/api/peers/{{.Peer.ID}}/config" download role="button" class="outline secondary">Download</a>
         <button class="outline" hx-get="/peers/{{.Peer.ID}}/edit" hx-target="#modal-container" hx-swap="innerHTML">Edit</button>
@@ -92,6 +89,19 @@ var templates = template.Must(template.New("").Funcs(template.FuncMap{
         </button>
     </div>
 </div>
+{{end}}
+
+{{define "peer-stats-oob"}}
+<small id="peer-stats-{{.Peer.ID}}" hx-swap-oob="true">
+    {{template "peer-stats" .}}
+</small>
+{{end}}
+
+{{define "peer-stats"}}
+    {{.Peer.AllowedIPs}}
+    {{if .HasStats}} &middot; &darr;{{.TransferRx}} &uarr;{{.TransferTx}} &middot; shake {{.Handshake}}{{end}}
+    {{if not .HasStats}} &middot; Created {{formatTime .Peer.CreatedAt}}{{end}}
+    {{if .HasStats}} <span class="peer-sparkline">{{.SparklineSVG | safeHTML}}</span>{{end}}
 {{end}}
 
 {{define "qr-modal"}}

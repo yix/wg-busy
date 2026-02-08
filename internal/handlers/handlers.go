@@ -33,6 +33,7 @@ func NewRouter(store *config.Store, webFS fs.FS, stats *wgstats.Collector) *http
 	mux.HandleFunc("PUT /peers/{id}", h.UpdatePeer)
 	mux.HandleFunc("DELETE /peers/{id}", h.DeletePeer)
 	mux.HandleFunc("PUT /peers/{id}/toggle", h.TogglePeer)
+	mux.HandleFunc("GET /peers/stats", h.GetPeersStats)
 
 	// QR code modal (HTML dialog).
 	mux.HandleFunc("GET /peers/{id}/qr", h.QRCodeModal)
