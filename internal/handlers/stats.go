@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
 
@@ -11,48 +12,68 @@ import (
 	"github.com/yix/wg-busy/internal/wireguard"
 )
 
-// statsBarData is the template data for the stats bar fragment.
-type statsBarData struct {
-	IsUp         bool
-	Uptime       string
-	TotalRx      string
-	TotalTx      string
-	CurrentRx    string
-	CurrentTx    string
-	SparklineSVG string
+// ServerStatsJSON represents the server part of the JSON response.
+type ServerStatsJSON struct {
+	IsUp         bool   `json:"isUp"`
+	Uptime       string `json:"uptime"`
+	TotalRx      string `json:"totalRx"`
+	TotalTx      string `json:"totalTx"`
+	SparklineSVG string `json:"sparklineSVG"`
 }
 
-// GetCombinedStats returns the stats bar HTML fragment and updates peer stats via OOB swaps.
+// PeerStatsJSON represents a peer's stats in the JSON response.
+type PeerStatsJSON struct {
+	ID           string `json:"id"`
+	AllowedIPs   string `json:"allowedIPs"`
+	HasStats     bool   `json:"hasStats"`
+	TransferRx   string `json:"transferRx"`
+	TransferTx   string `json:"transferTx"`
+	Handshake    string `json:"handshake"`
+	CreatedAt    string `json:"createdAt"`
+	SparklineSVG string `json:"sparklineSVG"`
+}
+
+// StatsResponse is the top-level JSON response.
+type StatsResponse struct {
+	Server ServerStatsJSON `json:"server"`
+	Peers  []PeerStatsJSON `json:"peers"`
+}
+
+// GetCombinedStats returns stats as JSON for client-side rendering.
 func (h *handler) GetCombinedStats(w http.ResponseWriter, r *http.Request) {
-	var data statsBarData
-	var peerList peersListData
+	var resp StatsResponse
 
+	// Server stats
 	if h.stats != nil {
-		data.IsUp = h.stats.IsUp()
-		data.Uptime = wgstats.FormatDuration(h.stats.Uptime())
+		resp.Server.IsUp = h.stats.IsUp()
+		resp.Server.Uptime = wgstats.FormatDuration(h.stats.Uptime())
 		iface := h.stats.GetInterfaceStats()
-		data.TotalRx = wgstats.FormatBytes(iface.TotalRx)
-		data.TotalTx = wgstats.FormatBytes(iface.TotalTx)
-		data.CurrentRx = wgstats.FormatBytesPerSec(iface.CurrentRxPS)
-		data.CurrentTx = wgstats.FormatBytesPerSec(iface.CurrentTxPS)
-		data.SparklineSVG = wgstats.RenderSparklineSVG(h.stats.GetHistory(), 120, 24)
+		resp.Server.TotalRx = wgstats.FormatBytes(iface.TotalRx)
+		resp.Server.TotalTx = wgstats.FormatBytes(iface.TotalTx)
+		resp.Server.SparklineSVG = wgstats.RenderSparklineSVG(h.stats.GetHistory(), 120, 24)
 	}
 
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-
-	// Render main stats bar
-	if err := templates.ExecuteTemplate(w, "stats-bar", data); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	// Render peer stats OOB
-	peerList = h.buildPeersListData()
-	for _, peerRow := range peerList.Peers {
-		// Only render if we have stats (or valid blank stats) to show
-		if err := templates.ExecuteTemplate(w, "peer-stats-oob", peerRow); err != nil {
-			fmt.Printf("Error rendering peer stats OOB for %s: %v\n", peerRow.Peer.ID, err)
+	// Peer stats
+	peerList := h.buildPeersListData()
+	for _, p := range peerList.Peers {
+		ps := PeerStatsJSON{
+			ID:         p.Peer.ID,
+			AllowedIPs: p.Peer.AllowedIPs,
+			CreatedAt:  p.Peer.CreatedAt.Format("2006-01-02"),
 		}
+		if p.HasStats {
+			ps.HasStats = true
+			ps.TransferRx = p.TransferRx
+			ps.TransferTx = p.TransferTx
+			ps.Handshake = p.Handshake
+			ps.SparklineSVG = p.SparklineSVG
+		}
+		resp.Peers = append(resp.Peers, ps)
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(resp); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
 	}
 }
 

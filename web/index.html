@@ -7,6 +7,8 @@
     <title>WG Busy - WireGuard Manager</title>
     <link rel="stylesheet" href="https://unpkg.com/@picocss/pico@2/css/pico.min.css">
     <script src="https://unpkg.com/htmx.org@2.0.4"></script>
+    <script src="https://unpkg.com/htmx-ext-client-side-templates@2.0.0/client-side-templates.js"></script>
+    <script src="https://unpkg.com/handlebars@4.7.8/dist/handlebars.min.js"></script>
     <style>
         .tabs {
             display: flex;
@@ -234,8 +236,38 @@
             <p>WireGuard Server Manager</p>
         </hgroup>
 
-        <div id="stats-bar" hx-get="stats" hx-trigger="load, every 2s" hx-swap="outerHTML">
+        <div id="stats-bar" class="stats-bar" hx-ext="client-side-templates" handlebars-template="stats-template"
+            hx-get="stats" hx-trigger="load, every 2s" hx-swap="innerHTML">
         </div>
+
+        <template id="stats-template">
+            <div class="stats-bar-inner">
+                <span class="stats-status">
+                    {{#if server.isUp}}
+                    <span class="status-dot status-up"></span> wg0 up {{server.uptime}}
+                    {{else}}
+                    <span class="status-dot status-down"></span> wg0 down
+                    {{/if}}
+                </span>
+                <span class="stats-transfer">
+                    <span class="stats-rx">&darr; {{server.totalRx}}</span>
+                    <span class="stats-tx">&uarr; {{server.totalTx}}</span>
+                </span>
+                <span class="stats-sparkline">{{{server.sparklineSVG}}}</span>
+            </div>
+
+            {{#each peers}}
+            <small id="peer-stats-{{id}}" hx-swap-oob="true">
+                {{allowedIPs}}
+                {{#if hasStats}}
+                &middot; &darr;{{transferRx}} &uarr;{{transferTx}} &middot; shake {{handshake}}
+                <span class="peer-sparkline">{{{sparklineSVG}}}</span>
+                {{else}}
+                &middot; Created {{createdAt}}
+                {{/if}}
+            </small>
+            {{/each}}
+        </template>
 
         <div class="tabs" role="tablist">
             <button role="tab" class="active" hx-get="peers" hx-target="#tab-content" hx-swap="innerHTML"
