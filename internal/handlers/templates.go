@@ -40,7 +40,7 @@ var templates = template.Must(template.New("").Funcs(template.FuncMap{
 {{end}}
 
 {{define "peers-list"}}
-<div id="peers-list" hx-get="peers/stats" hx-trigger="every 2s" hx-swap="none">
+<div id="peers-list">
     <div class="header-row">
         <h2>Peers ({{len .Peers}})</h2>
         <button hx-get="peers/new" hx-target="#modal-container" hx-swap="innerHTML">+ Add Peer</button>

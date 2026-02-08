@@ -22,8 +22,8 @@ func NewRouter(store *config.Store, webFS fs.FS, stats *wgstats.Collector) *http
 	// Static files (index.html).
 	mux.Handle("GET /", http.FileServerFS(webFS))
 
-	// Stats bar fragment.
-	mux.HandleFunc("GET /stats", h.GetStatsBar)
+	// Stats bar fragment (includes OOB peer stats).
+	mux.HandleFunc("GET /stats", h.GetCombinedStats)
 
 	// Peer fragment endpoints.
 	mux.HandleFunc("GET /peers", h.ListPeers)
@@ -33,7 +33,6 @@ func NewRouter(store *config.Store, webFS fs.FS, stats *wgstats.Collector) *http
 	mux.HandleFunc("PUT /peers/{id}", h.UpdatePeer)
 	mux.HandleFunc("DELETE /peers/{id}", h.DeletePeer)
 	mux.HandleFunc("PUT /peers/{id}/toggle", h.TogglePeer)
-	mux.HandleFunc("GET /peers/stats", h.GetPeersStats)
 
 	// QR code modal (HTML dialog).
 	mux.HandleFunc("GET /peers/{id}/qr", h.QRCodeModal)

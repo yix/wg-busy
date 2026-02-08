@@ -22,9 +22,10 @@ type statsBarData struct {
 	SparklineSVG string
 }
 
-// GetStatsBar returns the stats bar HTML fragment.
-func (h *handler) GetStatsBar(w http.ResponseWriter, r *http.Request) {
+// GetCombinedStats returns the stats bar HTML fragment and updates peer stats via OOB swaps.
+func (h *handler) GetCombinedStats(w http.ResponseWriter, r *http.Request) {
 	var data statsBarData
+	var peerList peersListData
 
 	if h.stats != nil {
 		data.IsUp = h.stats.IsUp()
@@ -38,8 +39,20 @@ func (h *handler) GetStatsBar(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+
+	// Render main stats bar
 	if err := templates.ExecuteTemplate(w, "stats-bar", data); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// Render peer stats OOB
+	peerList = h.buildPeersListData()
+	for _, peerRow := range peerList.Peers {
+		// Only render if we have stats (or valid blank stats) to show
+		if err := templates.ExecuteTemplate(w, "peer-stats-oob", peerRow); err != nil {
+			fmt.Printf("Error rendering peer stats OOB for %s: %v\n", peerRow.Peer.ID, err)
+		}
 	}
 }
 

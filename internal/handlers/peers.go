@@ -424,18 +424,3 @@ func (h *handler) RegeneratePeerKeys(w http.ResponseWriter, r *http.Request) {
 	// Return the edit form with updated data.
 	h.GetPeerForm(w, r)
 }
-
-// GetPeersStats handles GET /peers/stats.
-func (h *handler) GetPeersStats(w http.ResponseWriter, r *http.Request) {
-	data := h.buildPeersListData()
-
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	for _, peerRow := range data.Peers {
-		if err := templates.ExecuteTemplate(w, "peer-stats-oob", peerRow); err != nil {
-			// Log error but continue trying to render others?
-			// Since we've already started writing to the response, we can't really error out cleanly.
-			// Ideally we buffer, but for now direct write is okay.
-			fmt.Printf("Error rendering peer stats for %s: %v\n", peerRow.Peer.ID, err)
-		}
-	}
-}
