@@ -16,12 +16,25 @@ jobs:
   build-and-push:
     runs-on: ubuntu-latest
     permissions:
-      contents: read
+      contents: write
       packages: write
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: '0'
+
+      # Generate new tag version
+      - name: Generate new tag version
+        id: tag_version
+        uses: anothrNick/github-tag-action@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          DRY_RUN: ${{ github.event_name == 'pull_request' }}
+          VERBOSE: true
+          DEFAULT_BUMP: patch
+          WITH_V: true
 
       # Set up QEMU for multi-platform support (arm64, etc.)
       - name: Set up QEMU
@@ -57,9 +70,8 @@ jobs:
             ${{ secrets.DOCKERHUB_USERNAME }}/${{ github.event.repository.name }}
             ${{ env.REGISTRY_GHCR }}/${{ env.IMAGE_NAME }}
           tags: |
-            type=ref,event=branch
-            type=semver,pattern={{version}}
-            type=sha,format=long
+            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/master' }}
+            type=raw,value=${{ steps.tag_version.outputs.new_tag }}
 
       # Build and push the image
       - name: Build and push
