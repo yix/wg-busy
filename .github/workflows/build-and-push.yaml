@@ -69,8 +69,8 @@ jobs:
           # Define the architectures you want to support
           platforms: linux/amd64,linux/arm64
           push: ${{ github.event_name != 'pull_request' }}
-          tags: ${{ id.meta.outputs.tags }}
-          labels: ${{ id.meta.outputs.labels }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
           # Use cache-to/from to speed up subsequent builds
           cache-from: type=gha
           cache-to: type=gha,mode=max
