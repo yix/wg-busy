@@ -71,7 +71,7 @@ func (h *handler) UpdateServerConfig(w http.ResponseWriter, r *http.Request) {
 			})
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
 			w.WriteHeader(http.StatusUnprocessableEntity)
-			templates.ExecuteTemplate(w, "server-config", data)
+			_ = templates.ExecuteTemplate(w, "server-config", data)
 			return
 		}
 		data.Error = writeErr.Error()
@@ -80,11 +80,11 @@ func (h *handler) UpdateServerConfig(w http.ResponseWriter, r *http.Request) {
 		})
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.WriteHeader(http.StatusInternalServerError)
-		templates.ExecuteTemplate(w, "server-config", data)
+		_ = templates.ExecuteTemplate(w, "server-config", data)
 		return
 	}
 
 	data.Success = "Configuration saved successfully."
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	templates.ExecuteTemplate(w, "server-config", data)
+	_ = templates.ExecuteTemplate(w, "server-config", data)
 }

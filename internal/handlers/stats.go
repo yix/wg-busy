@@ -113,7 +113,7 @@ func (h *handler) QRCode(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "image/png")
 	w.Header().Set("Cache-Control", "no-cache")
-	w.Write(png)
+	_, _ = w.Write(png)
 }
 
 // QRCodeModal handles GET /peers/{id}/qr — returns an HTML dialog with the QR code image.

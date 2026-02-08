@@ -53,7 +53,7 @@ func (h *handler) DownloadClientConfig(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/octet-stream")
 	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", filename))
-	w.Write([]byte(content))
+	_, _ = w.Write([]byte(content))
 }
 
 // DownloadServerConfig handles GET /api/server/config.
@@ -74,7 +74,7 @@ func (h *handler) DownloadServerConfig(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/octet-stream")
 	w.Header().Set("Content-Disposition", `attachment; filename="wg0.conf"`)
-	w.Write([]byte(content))
+	_, _ = w.Write([]byte(content))
 }
 
 // ApplyConfig handles POST /api/server/apply.
@@ -87,7 +87,7 @@ func (h *handler) ApplyConfig(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	if err != nil {
 		msg := fmt.Sprintf("Failed to apply config: %v\n%s", err, string(output))
-		templates.ExecuteTemplate(w, "toast-error", msg)
+		_ = templates.ExecuteTemplate(w, "toast-error", msg)
 		return
 	}
 
@@ -96,5 +96,5 @@ func (h *handler) ApplyConfig(w http.ResponseWriter, r *http.Request) {
 		h.stats.SetStartedAt(time.Now())
 	}
 
-	templates.ExecuteTemplate(w, "toast-success", "WireGuard configuration applied successfully.")
+	_ = templates.ExecuteTemplate(w, "toast-success", "WireGuard configuration applied successfully.")
 }
