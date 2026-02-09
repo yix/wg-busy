@@ -18,6 +18,8 @@ type ServerStatsJSON struct {
 	Uptime       string `json:"uptime"`
 	TotalRx      string `json:"totalRx"`
 	TotalTx      string `json:"totalTx"`
+	CurrentRxPS  string `json:"currentRxPS"`
+	CurrentTxPS  string `json:"currentTxPS"`
 	SparklineSVG string `json:"sparklineSVG"`
 }
 
@@ -28,6 +30,8 @@ type PeerStatsJSON struct {
 	HasStats     bool   `json:"hasStats"`
 	TransferRx   string `json:"transferRx"`
 	TransferTx   string `json:"transferTx"`
+	CurrentRxPS  string `json:"currentRxPS"`
+	CurrentTxPS  string `json:"currentTxPS"`
 	Handshake    string `json:"handshake"`
 	CreatedAt    string `json:"createdAt"`
 	SparklineSVG string `json:"sparklineSVG"`
@@ -50,6 +54,8 @@ func (h *handler) GetCombinedStats(w http.ResponseWriter, r *http.Request) {
 		iface := h.stats.GetInterfaceStats()
 		resp.Server.TotalRx = wgstats.FormatBytes(iface.TotalRx)
 		resp.Server.TotalTx = wgstats.FormatBytes(iface.TotalTx)
+		resp.Server.CurrentRxPS = wgstats.FormatBytesPerSec(iface.CurrentRxPS)
+		resp.Server.CurrentTxPS = wgstats.FormatBytesPerSec(iface.CurrentTxPS)
 		resp.Server.SparklineSVG = wgstats.RenderSparklineSVG(h.stats.GetHistory(), 120, 24)
 	}
 
@@ -65,6 +71,8 @@ func (h *handler) GetCombinedStats(w http.ResponseWriter, r *http.Request) {
 			ps.HasStats = true
 			ps.TransferRx = p.TransferRx
 			ps.TransferTx = p.TransferTx
+			ps.CurrentRxPS = p.CurrentRxPS
+			ps.CurrentTxPS = p.CurrentTxPS
 			ps.Handshake = p.Handshake
 			ps.SparklineSVG = p.SparklineSVG
 		}

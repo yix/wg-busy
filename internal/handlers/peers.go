@@ -22,6 +22,8 @@ type peerRowData struct {
 	ExitNodeName string
 	TransferRx   string
 	TransferTx   string
+	CurrentRxPS  string
+	CurrentTxPS  string
 	Handshake    string
 	SparklineSVG string
 	HasStats     bool
@@ -73,6 +75,8 @@ func (h *handler) buildPeersListData() peersListData {
 				row.HasStats = true
 				row.TransferRx = wgstats.FormatBytes(ps.TransferRx)
 				row.TransferTx = wgstats.FormatBytes(ps.TransferTx)
+				row.CurrentRxPS = wgstats.FormatBytesPerSec(ps.CurrentRxPS)
+				row.CurrentTxPS = wgstats.FormatBytesPerSec(ps.CurrentTxPS)
 				row.Handshake = wgstats.FormatHandshake(ps.LatestHandshake)
 				if h.stats != nil {
 					row.SparklineSVG = wgstats.RenderSparklineSVG(h.stats.GetPeerHistory(p.PublicKey), 80, 16)
