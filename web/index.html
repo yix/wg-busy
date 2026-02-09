@@ -250,9 +250,9 @@
                     {{/if}}
                 </span>
                 <span class="stats-transfer">
-                    <span class="stats-rx">&darr; {{server.totalRx}} <small
+                    <span class="stats-rx">&uarr; {{server.totalRx}} <small
                             class="text-muted">({{server.currentRxPS}})</small></span>
-                    <span class="stats-tx">&uarr; {{server.totalTx}} <small
+                    <span class="stats-tx">&darr; {{server.totalTx}} <small
                             class="text-muted">({{server.currentTxPS}})</small></span>
                 </span>
                 <span class="stats-sparkline">{{{server.sparklineSVG}}}</span>
@@ -262,8 +262,8 @@
             <small id="peer-stats-{{id}}" hx-swap-oob="true">
                 {{allowedIPs}}
                 {{#if hasStats}}
-                &middot; <span class="stats-rx">&darr;{{transferRx}} <small
-                        class="text-muted">({{currentRxPS}})</small></span> <span class="stats-tx">&uarr;{{transferTx}}
+                &middot; <span class="stats-rx">&uarr;{{transferRx}} <small
+                        class="text-muted">({{currentRxPS}})</small></span> <span class="stats-tx">&darr;{{transferTx}}
                     <small class="text-muted">({{currentTxPS}})</small></span> &middot; shake
                 {{handshake}}
                 <span class="peer-sparkline">{{{sparklineSVG}}}</span>
