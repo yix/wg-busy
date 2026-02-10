@@ -110,6 +110,8 @@ type AppConfig struct {
 | ClientAllowedIPs | string | no | CIDR list, default "0.0.0.0/0, ::/0" | — (client conf) |
 | IsExitNode | bool | no | mutually exclusive with ExitNodeID | — |
 | ExitNodeID | string | no | valid exit node peer ID | — |
+| ExitNodeAllowAll | bool | no | true=full tunnel (0.0.0.0/0), false=split | — |
+| ExitNodeRoutes | []string | no | list of CIDRs for split tunnel | — |
 | RoutingTableID | uint | auto | assigned when IsExitNode=true | — |
 | Enabled | bool | no | default true | — (controls inclusion) |
 | CreatedAt | time | auto | — | — |
@@ -138,6 +140,7 @@ Any peer can be marked as an **exit node**. Other peers can route their traffic 
 
 ### How It Works
 
+**Full Tunnel (Default)**:
 ```
                         Internet
                            ↑
@@ -164,6 +167,9 @@ Any peer can be marked as an **exit node**. Other peers can route their traffic 
 
 Alice's traffic: Alice → wg0 server → policy route table 100 → exit node 10.0.0.5 → Internet
 
+**Split Tunnel**:
+If an exit node is configured with specific routes (e.g. `10.10.0.0/24`), only traffic for those subnets is routed through it. The `wg0.conf` `AllowedIPs` for that peer will be restricted to its tunnel IP + the routed subnets.
+
 ### Data Model
 ```yaml
 - id: "exit-us"
@@ -179,7 +185,9 @@ Alice's traffic: Alice → wg0 server → policy route table 100 → exit node 1
 ```
 
 ### wg0.conf Rendering
-- Exit node peers: `AllowedIPs` overridden to `0.0.0.0/0, ::/0` in wg0.conf
+- Exit node peers: `AllowedIPs` are calculated based on routing mode:
+    - **Full Tunnel** (`ExitNodeAllowAll=true`): `AllowedIPs = 0.0.0.0/0, ::/0`
+    - **Split Tunnel** (`ExitNodeAllowAll=false`): `AllowedIPs = <PeerIP>, <Route1>, <Route2>...`
 - Routing commands injected into PostUp/PostDown (after user-defined commands):
 
 ```ini

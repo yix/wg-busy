@@ -49,7 +49,15 @@ func GeneratePostUpCommands(cfg models.AppConfig) []string {
 		if exitIP == "" {
 			continue
 		}
-		cmds = append(cmds, fmt.Sprintf("ip route add default via %s dev wg0 table %d", exitIP, exitNode.RoutingTableID))
+		if exitNode.ExitNodeAllowAll {
+			cmds = append(cmds, fmt.Sprintf("ip route add default via %s dev wg0 table %d", exitIP, exitNode.RoutingTableID))
+		} else {
+			for _, route := range exitNode.ExitNodeRoutes {
+				if route != "" {
+					cmds = append(cmds, fmt.Sprintf("ip route add %s via %s dev wg0 table %d", route, exitIP, exitNode.RoutingTableID))
+				}
+			}
+		}
 		addedTables[exitNode.RoutingTableID] = true
 	}
 
@@ -114,7 +122,15 @@ func GeneratePostDownCommands(cfg models.AppConfig) []string {
 		if exitIP == "" {
 			continue
 		}
-		cmds = append(cmds, fmt.Sprintf("ip route del default via %s dev wg0 table %d", exitIP, exitNode.RoutingTableID))
+		if exitNode.ExitNodeAllowAll {
+			cmds = append(cmds, fmt.Sprintf("ip route del default via %s dev wg0 table %d", exitIP, exitNode.RoutingTableID))
+		} else {
+			for _, route := range exitNode.ExitNodeRoutes {
+				if route != "" {
+					cmds = append(cmds, fmt.Sprintf("ip route del %s via %s dev wg0 table %d", route, exitIP, exitNode.RoutingTableID))
+				}
+			}
+		}
 		removedTables[exitNode.RoutingTableID] = true
 	}
 

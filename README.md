@@ -14,6 +14,7 @@ WG-Busy is a web-based UI for managing a WireGuard server. It is inspired by pro
 - **Full Control**: Persistence via YAML, but renders standard `wg0.conf` files. You can customize `PostUp`/`PostDown` scripts and other advanced settings directly.
 - **Advanced Routing**:
   - **Flexible Exit Nodes**: Any peer can be an exit node for any other peer.
+  - **Split Tunneling**: Configure exit nodes to route all traffic or only specific subnets.
   - **Policy Routing**: Automatically manages Linux policy routing tables to direct traffic through specific peers.
 - **Real-time Stats**: Live bandwidth usage, sparkline graphs, and connection status.
 - **QR Codes**: Generate configuration QR codes for mobile clients.

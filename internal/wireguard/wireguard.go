@@ -133,7 +133,11 @@ func RenderServerConfig(cfg models.AppConfig, postUpCmds, postDownCmds []string)
 		}
 		effective := p.AllowedIPs
 		if p.IsExitNode {
-			effective = "0.0.0.0/0, ::/0"
+			if p.ExitNodeAllowAll {
+				effective = "0.0.0.0/0, ::/0"
+			} else if len(p.ExitNodeRoutes) > 0 {
+				effective = fmt.Sprintf("%s, %s", p.AllowedIPs, strings.Join(p.ExitNodeRoutes, ", "))
+			}
 		}
 		peers = append(peers, peerConfData{
 			Peer:                p,
