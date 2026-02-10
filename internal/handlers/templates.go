@@ -24,21 +24,6 @@ var templates = template.Must(template.New("").Funcs(template.FuncMap{
 <div class="toast toast-error" role="alert">{{.}}</div>
 {{end}}
 
-{{define "stats-bar"}}
-<div id="stats-bar" class="stats-bar" hx-get="stats" hx-trigger="every 2s" hx-swap="outerHTML">
-    <div class="stats-bar-inner">
-        <span class="stats-status">
-            {{if .IsUp}}<span class="status-dot status-up"></span> wg0 up {{.Uptime}}{{else}}<span class="status-dot status-down"></span> wg0 down{{end}}
-        </span>
-        <span class="stats-transfer">
-            <span class="stats-rx">&darr; {{.TotalRx}} <small class="text-muted">({{.CurrentRxPS}})</small></span>
-            <span class="stats-tx">&uarr; {{.TotalTx}} <small class="text-muted">({{.CurrentTxPS}})</small></span>
-        </span>
-        <span class="stats-sparkline">{{.SparklineSVG | safeHTML}}</span>
-    </div>
-</div>
-{{end}}
-
 {{define "peers-list"}}
 <div id="peers-list">
     <div class="header-row">
@@ -89,12 +74,6 @@ var templates = template.Must(template.New("").Funcs(template.FuncMap{
         </button>
     </div>
 </div>
-{{end}}
-
-{{define "peer-stats-oob"}}
-<small id="peer-stats-{{.Peer.ID}}" hx-swap-oob="true">
-    {{template "peer-stats" .}}
-</small>
 {{end}}
 
 {{define "peer-stats"}}
