@@ -318,8 +318,20 @@
 
         function toggleExitNodeFields(checkbox) {
             var routeVia = document.getElementById('route-via-field');
+            var exitConfig = document.getElementById('exit-node-config');
+
             if (routeVia) {
                 routeVia.style.display = checkbox.checked ? 'none' : '';
+            }
+            if (exitConfig) {
+                exitConfig.style.display = checkbox.checked ? '' : 'none';
+            }
+        }
+
+        function toggleExitNodeRoutes(checkbox) {
+            var routesField = document.getElementById('exit-node-routes-field');
+            if (routesField) {
+                routesField.style.display = checkbox.checked ? 'none' : '';
             }
         }
 

@@ -177,6 +177,28 @@ var templates = template.Must(template.New("").Funcs(template.FuncMap{
                 </label>
             </fieldset>
 
+            <div id="exit-node-config" {{if not .Peer.IsExitNode}}style="display:none"{{end}} class="exit-node-field">
+                <fieldset>
+                    <legend>Exit Node Configuration</legend>
+                    <label>
+                        <input type="checkbox" name="exitNodeAllowAll" 
+                               {{if or (not .Peer.ID) .Peer.ExitNodeAllowAll}}checked{{end}}
+                               onchange="toggleExitNodeRoutes(this)">
+                        Route all traffic via this node (0.0.0.0/0)
+                    </label>
+                    
+                    <div id="exit-node-routes-field" {{if or (not .Peer.ID) .Peer.ExitNodeAllowAll}}style="display:none"{{end}}>
+                        <label>
+                            Specific Routes (CIDRs)
+                            <textarea name="exitNodeRoutes" rows="3" 
+                                      placeholder="10.0.0.0/24">{{range .Peer.ExitNodeRoutes}}{{.}}
+{{end}}</textarea>
+                            <small>One CIDR per line. Leave empty to route nothing (if check disabled).</small>
+                        </label>
+                    </div>
+                </fieldset>
+            </div>
+
             <div id="route-via-field" {{if .Peer.IsExitNode}}style="display:none"{{end}}>
                 <label>
                     Route via (exit node)
