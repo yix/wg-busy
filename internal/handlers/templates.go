@@ -25,7 +25,7 @@ var templates = template.Must(template.New("").Funcs(template.FuncMap{
 {{end}}
 
 {{define "peers-list"}}
-<div id="peers-list">
+<div id="peers-list" {{if .OOB}}hx-swap-oob="true"{{end}}>
     <div class="header-row">
         <h2>Peers ({{len .Peers}})</h2>
         <button hx-get="peers/new" hx-target="#modal-container" hx-swap="innerHTML">+ Add Peer</button>
@@ -110,7 +110,7 @@ var templates = template.Must(template.New("").Funcs(template.FuncMap{
             <p><strong>{{if .IsNew}}Add Peer{{else}}Edit Peer{{end}}</strong></p>
         </header>
         <form {{if .IsNew}}hx-post="peers"{{else}}hx-put="peers/{{.Peer.ID}}"{{end}}
-              hx-target="#tab-content" hx-swap="innerHTML"
+              hx-target="#modal-container" hx-swap="innerHTML"
               onsubmit="validatePeerForm(event)">
 
             {{if .Error}}<div class="toast toast-error">{{.Error}}</div>{{end}}

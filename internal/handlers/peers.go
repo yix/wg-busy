@@ -32,6 +32,7 @@ type peerRowData struct {
 // peersListData is the template data for the peers list.
 type peersListData struct {
 	Peers []peerRowData
+	OOB   bool
 }
 
 // peerFormData is the template data for the peer create/edit form.
@@ -228,8 +229,10 @@ func (h *handler) CreatePeer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Success: return full peers list.
-	h.ListPeers(w, r)
+	// Success: return full peers list with OOB swap to close modal.
+	// We return an empty string (200 OK) for the form target (#modal-container), which clears the modal.
+	// The OOB swap updates the peers list in the background.
+	h.listPeersOOB(w, r)
 }
 
 // UpdatePeer handles PUT /peers/{id}.
@@ -305,7 +308,7 @@ func (h *handler) UpdatePeer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	h.ListPeers(w, r)
+	h.listPeersOOB(w, r)
 }
 
 // DeletePeer handles DELETE /peers/{id}.
@@ -427,4 +430,12 @@ func (h *handler) RegeneratePeerKeys(w http.ResponseWriter, r *http.Request) {
 
 	// Return the edit form with updated data.
 	h.GetPeerForm(w, r)
+}
+func (h *handler) listPeersOOB(w http.ResponseWriter, r *http.Request) {
+	data := h.buildPeersListData()
+	data.OOB = true
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	if err := templates.ExecuteTemplate(w, "peers-list", data); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+	}
 }
