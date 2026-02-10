@@ -4,8 +4,12 @@ on:
   push:
     branches: ["master"]
     tags: ["v*.*.*"]
+    paths-ignore:
+      - '**.md'
+      - '.github/**'
   pull_request:
     branches: ["master"]
+  
 
 env:
   REGISTRY_GHCR: ghcr.io
