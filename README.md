@@ -15,7 +15,8 @@ WG-Busy is a web-based UI for managing a WireGuard server. It is inspired by pro
 - **Advanced Routing**:
   - **Flexible Exit Nodes**: Any peer can be an exit node for any other peer.
   - **Split Tunneling**: Configure exit nodes to route all traffic or only specific subnets.
-  - **Policy Routing**: Automatically manages Linux policy routing tables to direct traffic through specific peers.
+  - **Advertised Routes**: Expose networks behind a peer to the VPN.
+  - **Policy Routing**: Define custom routes with specific gateways (`CIDR via IP`) per peer, automatically managing Linux policy routing tables.
 - **Real-time Stats**: Live bandwidth usage, sparkline graphs, and connection status.
 - **QR Codes**: Generate configuration QR codes for mobile clients.
 
@@ -74,12 +75,14 @@ The application is configured via CLI flags or environment variables:
 | `-config` | `WG_BUSY_CONFIG` | `./data/config.yaml` | Path to the persistent YAML config file |
 | `-wg-config` | `WG_BUSY_WG_CONFIG` | `/etc/wireguard/wg0.conf` | Path where the standard WireGuard config will be rendered |
 
-### Routing & Exit Nodes
+### Routing & Advanced Traffic Management
 
 One of WG-Busy's key features is the ability to define complex routing topologies.
 
 -   **Exit Node**: Toggle "Exit Node" on a peer to allow it to route traffic for others.
 -   **Route Via**: For any other peer, select an available Exit Node to route all their traffic through that peer.
+-   **Advertised Routes**: Define subnets that reside behind a peer. The server will automatically route traffic for these subnets to the peer.
+-   **Policy Routes**: Configure explicit `CIDR via Gateway IP` rules per client. All traffic matching the CIDR and originating from that client will be directed to a dedicated policy routing table and pushed out the specified gateway.
 
 This is implemented using Linux policy routing (`ip rule` and custom routing tables), which WG-Busy manages automatically in the `PostUp`/`PostDown` hooks.
 

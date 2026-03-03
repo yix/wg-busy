@@ -112,7 +112,10 @@ type AppConfig struct {
 | ExitNodeID | string | no | valid exit node peer ID | — |
 | ExitNodeAllowAll | bool | no | true=full tunnel (0.0.0.0/0), false=split | — |
 | ExitNodeRoutes | []string | no | list of CIDRs for split tunnel | — |
+| AdvertisedRoutes | []string | no | list of CIDRs to route through peer | — |
+| PolicyRoutes | []string | no | list of "CIDR via IP" strings | — |
 | RoutingTableID | uint | auto | assigned when IsExitNode=true | — |
+| PolicyRoutingTableID | uint | auto | assigned when PolicyRoutes is set | — |
 | Enabled | bool | no | default true | — (controls inclusion) |
 | CreatedAt | time | auto | — | — |
 | UpdatedAt | time | auto | — | — |
@@ -133,7 +136,7 @@ PublicKey = <alice_pubkey>    AllowedIPs = 0.0.0.0/0, ::/0  ← ClientAllowedIPs
 AllowedIPs = 10.0.0.2/32     ← AllowedIPs
 ```
 
-## Exit Node Routing
+## Routing & Traffic Management
 
 ### Concept
 Any peer can be marked as an **exit node**. Other peers can route their traffic through a specific exit node. The WireGuard server acts as a policy router using Linux `ip rule` + custom routing tables.
@@ -221,6 +224,16 @@ PostDown = iptables -D FORWARD -i wg0 -j ACCEPT; ...   # user-defined
 ### UI
 - Peer list: "Exit Node" badge, "via <name>" label
 - Peer form: "Exit Node" checkbox (hides Route via), "Route via" dropdown (hides when Exit Node checked)
+
+### Advertised Routes
+Peers can declare "Advertised Routes", which are subnets that reside behind the peer. These CIDRs are appended to the `AllowedIPs` directive in the server's `wg0.conf` for the peer. WireGuard's `wg-quick` will automatically add standard static routes for these subnets targeting the WireGuard interface, ensuring returning or transit traffic reaches the peer.
+
+### Policy Routes
+If you need granular control where traffic from a specific peer destined to specific subnets must be routed via a distinct gateway IP, you can configure "Policy Routes" (formatted as `<CIDR> via <Gateway IP>`).
+When defined, WG-Busy assigns a dedicated `PolicyRoutingTableID` to the peer and injects:
+- `ip rule add from <peer_ip> table <table_id>`
+- `ip route add <CIDR> via <Gateway IP> dev wg0 table <table_id>`
+These commands are added to `PostUp` and mirrored in `PostDown` for clean teardown.
 
 ## Config Persistence: YAML → .conf
 
