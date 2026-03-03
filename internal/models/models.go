@@ -35,25 +35,27 @@ type ServerConfig struct {
 
 // Peer represents a WireGuard peer (client).
 type Peer struct {
-	ID                  string    `yaml:"id"`
-	Name                string    `yaml:"name"`
-	PrivateKey          string    `yaml:"privateKey"`
-	PublicKey           string    `yaml:"publicKey"`
-	PresharedKey        string    `yaml:"presharedKey,omitempty"`
-	AllowedIPs          string    `yaml:"allowedIPs"`
-	Endpoint            string    `yaml:"endpoint,omitempty"`
-	PersistentKeepalive uint16    `yaml:"persistentKeepalive,omitempty"`
-	DNS                 string    `yaml:"dns,omitempty"`
-	ClientAllowedIPs    string    `yaml:"clientAllowedIPs,omitempty"`
-	IsExitNode          bool      `yaml:"isExitNode,omitempty"`
-	ExitNodeID          string    `yaml:"exitNodeID,omitempty"`
-	ExitNodeAllowAll    bool      `yaml:"exitNodeAllowAll,omitempty"`
-	ExitNodeRoutes      []string  `yaml:"exitNodeRoutes,omitempty"`
-	AdvertisedRoutes    []string  `yaml:"advertisedRoutes,omitempty"`
-	RoutingTableID      uint      `yaml:"routingTableID,omitempty"`
-	Enabled             bool      `yaml:"enabled"`
-	CreatedAt           time.Time `yaml:"createdAt"`
-	UpdatedAt           time.Time `yaml:"updatedAt"`
+	ID                   string    `yaml:"id"`
+	Name                 string    `yaml:"name"`
+	PrivateKey           string    `yaml:"privateKey"`
+	PublicKey            string    `yaml:"publicKey"`
+	PresharedKey         string    `yaml:"presharedKey,omitempty"`
+	AllowedIPs           string    `yaml:"allowedIPs"`
+	Endpoint             string    `yaml:"endpoint,omitempty"`
+	PersistentKeepalive  uint16    `yaml:"persistentKeepalive,omitempty"`
+	DNS                  string    `yaml:"dns,omitempty"`
+	ClientAllowedIPs     string    `yaml:"clientAllowedIPs,omitempty"`
+	IsExitNode           bool      `yaml:"isExitNode,omitempty"`
+	ExitNodeID           string    `yaml:"exitNodeID,omitempty"`
+	ExitNodeAllowAll     bool      `yaml:"exitNodeAllowAll,omitempty"`
+	ExitNodeRoutes       []string  `yaml:"exitNodeRoutes,omitempty"`
+	AdvertisedRoutes     []string  `yaml:"advertisedRoutes,omitempty"`
+	PolicyRoutes         []string  `yaml:"policyRoutes,omitempty"`
+	RoutingTableID       uint      `yaml:"routingTableID,omitempty"`
+	PolicyRoutingTableID uint      `yaml:"policyRoutingTableID,omitempty"`
+	Enabled              bool      `yaml:"enabled"`
+	CreatedAt            time.Time `yaml:"createdAt"`
+	UpdatedAt            time.Time `yaml:"updatedAt"`
 }
 
 // ValidationError represents a single field validation error.
@@ -203,6 +205,22 @@ func (p *Peer) Validate() ValidationErrors {
 		for _, route := range p.AdvertisedRoutes {
 			if _, _, err := net.ParseCIDR(route); err != nil {
 				errs = append(errs, ValidationError{Field: "advertisedRoutes", Message: fmt.Sprintf("invalid CIDR: %s", route)})
+			}
+		}
+	}
+
+	if len(p.PolicyRoutes) > 0 {
+		for _, pr := range p.PolicyRoutes {
+			parts := strings.Split(pr, " via ")
+			if len(parts) != 2 {
+				errs = append(errs, ValidationError{Field: "policyRoutes", Message: fmt.Sprintf("invalid format (must be 'CIDR via IP'): %s", pr)})
+				continue
+			}
+			if _, _, err := net.ParseCIDR(strings.TrimSpace(parts[0])); err != nil {
+				errs = append(errs, ValidationError{Field: "policyRoutes", Message: fmt.Sprintf("invalid CIDR: %s", parts[0])})
+			}
+			if net.ParseIP(strings.TrimSpace(parts[1])) == nil {
+				errs = append(errs, ValidationError{Field: "policyRoutes", Message: fmt.Sprintf("invalid Gateway IP: %s", parts[1])})
 			}
 		}
 	}

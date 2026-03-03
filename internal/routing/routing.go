@@ -2,6 +2,7 @@ package routing
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/yix/wg-busy/internal/models"
 )
@@ -14,6 +15,9 @@ func AssignRoutingTableID(peers []models.Peer) uint {
 	for _, p := range peers {
 		if p.RoutingTableID > 0 {
 			used[p.RoutingTableID] = true
+		}
+		if p.PolicyRoutingTableID > 0 {
+			used[p.PolicyRoutingTableID] = true
 		}
 	}
 	for id := routingTableBase; ; id++ {
@@ -77,6 +81,28 @@ func GeneratePostUpCommands(cfg models.AppConfig) []string {
 		cmds = append(cmds, fmt.Sprintf("ip rule add from %s table %d", peerIP, exitNode.RoutingTableID))
 	}
 
+	// Add policy routes and rules for custom PolicyRoutes
+	for _, p := range cfg.Peers {
+		if !p.Enabled || len(p.PolicyRoutes) == 0 || p.PolicyRoutingTableID == 0 {
+			continue
+		}
+		peerIP := models.FirstIP(p.AllowedIPs)
+		if peerIP == "" {
+			continue
+		}
+
+		cmds = append(cmds, fmt.Sprintf("ip rule add from %s table %d", peerIP, p.PolicyRoutingTableID))
+
+		for _, routeStr := range p.PolicyRoutes {
+			parts := strings.Split(routeStr, " via ")
+			if len(parts) == 2 {
+				subnet := strings.TrimSpace(parts[0])
+				gateway := strings.TrimSpace(parts[1])
+				cmds = append(cmds, fmt.Sprintf("ip route add %s via %s dev wg0 table %d", subnet, gateway, p.PolicyRoutingTableID))
+			}
+		}
+	}
+
 	return cmds
 }
 
@@ -132,6 +158,28 @@ func GeneratePostDownCommands(cfg models.AppConfig) []string {
 			}
 		}
 		removedTables[exitNode.RoutingTableID] = true
+	}
+
+	// Remove custom policy routes and rules
+	for _, p := range cfg.Peers {
+		if !p.Enabled || len(p.PolicyRoutes) == 0 || p.PolicyRoutingTableID == 0 {
+			continue
+		}
+		peerIP := models.FirstIP(p.AllowedIPs)
+		if peerIP == "" {
+			continue
+		}
+
+		cmds = append(cmds, fmt.Sprintf("ip rule del from %s table %d", peerIP, p.PolicyRoutingTableID))
+
+		for _, routeStr := range p.PolicyRoutes {
+			parts := strings.Split(routeStr, " via ")
+			if len(parts) == 2 {
+				subnet := strings.TrimSpace(parts[0])
+				gateway := strings.TrimSpace(parts[1])
+				cmds = append(cmds, fmt.Sprintf("ip route del %s via %s dev wg0 table %d", subnet, gateway, p.PolicyRoutingTableID))
+			}
+		}
 	}
 
 	return cmds

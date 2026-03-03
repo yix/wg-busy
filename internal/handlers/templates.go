@@ -147,6 +147,15 @@ var templates = template.Must(template.New("").Funcs(template.FuncMap{
                 <small>Networks behind this peer to route through the tunnel (one CIDR per line or comma-separated).</small>
                 {{range .ValidationErrors}}{{if eq .Field "advertisedRoutes"}}<small class="field-error">{{.Message}}</small>{{end}}{{end}}
             </label>
+            
+            <label>
+                Policy Routes
+                <textarea name="policyRoutes" rows="2"
+                          placeholder="10.5.5.0/24 via 10.0.0.1">{{range .Peer.PolicyRoutes}}{{.}}
+{{end}}</textarea>
+                <small>Format: &lt;CIDR&gt; via &lt;Gateway IP&gt;, one per line. Traffic to these subnets from this peer will be routed via the gateway.</small>
+                {{range .ValidationErrors}}{{if eq .Field "policyRoutes"}}<small class="field-error">{{.Message}}</small>{{end}}{{end}}
+            </label>
 
             <label>
                 DNS (override)

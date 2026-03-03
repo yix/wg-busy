@@ -184,6 +184,19 @@ func (h *handler) CreatePeer(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	var policyRoutes []string
+	if routesStr := strings.TrimSpace(r.FormValue("policyRoutes")); routesStr != "" {
+		for _, line := range strings.Split(routesStr, "\n") {
+			parts := strings.Split(line, ",")
+			for _, p := range parts {
+				p = strings.TrimSpace(p)
+				if p != "" {
+					policyRoutes = append(policyRoutes, p)
+				}
+			}
+		}
+	}
+
 	now := time.Now().UTC()
 	peer := models.Peer{
 		ID:                  uuid.New().String(),
@@ -201,6 +214,7 @@ func (h *handler) CreatePeer(w http.ResponseWriter, r *http.Request) {
 		ExitNodeAllowAll:    exitNodeAllowAll,
 		ExitNodeRoutes:      exitNodeRoutes,
 		AdvertisedRoutes:    advertisedRoutes,
+		PolicyRoutes:        policyRoutes,
 		Enabled:             r.FormValue("enabled") == "on",
 		CreatedAt:           now,
 		UpdatedAt:           now,
@@ -223,6 +237,11 @@ func (h *handler) CreatePeer(w http.ResponseWriter, r *http.Request) {
 		// Auto-assign routing table ID if exit node.
 		if peer.IsExitNode {
 			peer.RoutingTableID = routing.AssignRoutingTableID(cfg.Peers)
+		}
+
+		// Auto-assign policy routing table ID if policy routes exist.
+		if len(peer.PolicyRoutes) > 0 {
+			peer.PolicyRoutingTableID = routing.AssignRoutingTableID(cfg.Peers)
 		}
 
 		// Validate.
@@ -307,6 +326,19 @@ func (h *handler) UpdatePeer(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	var policyRoutes []string
+	if routesStr := strings.TrimSpace(r.FormValue("policyRoutes")); routesStr != "" {
+		for _, line := range strings.Split(routesStr, "\n") {
+			parts := strings.Split(line, ",")
+			for _, p := range parts {
+				p = strings.TrimSpace(p)
+				if p != "" {
+					policyRoutes = append(policyRoutes, p)
+				}
+			}
+		}
+	}
+
 	writeErr := h.store.Write(func(cfg *models.AppConfig) error {
 		p := models.FindPeerByID(cfg.Peers, id)
 		if p == nil {
@@ -326,6 +358,7 @@ func (h *handler) UpdatePeer(w http.ResponseWriter, r *http.Request) {
 		p.ExitNodeAllowAll = exitNodeAllowAll
 		p.ExitNodeRoutes = exitNodeRoutes
 		p.AdvertisedRoutes = advertisedRoutes
+		p.PolicyRoutes = policyRoutes
 		p.Enabled = r.FormValue("enabled") == "on"
 		p.UpdatedAt = time.Now().UTC()
 
@@ -335,6 +368,14 @@ func (h *handler) UpdatePeer(w http.ResponseWriter, r *http.Request) {
 		}
 		if !isExitNode {
 			p.RoutingTableID = 0
+		}
+
+		// Handle policy routes transitions.
+		if len(policyRoutes) > 0 && p.PolicyRoutingTableID == 0 {
+			p.PolicyRoutingTableID = routing.AssignRoutingTableID(cfg.Peers)
+		}
+		if len(policyRoutes) == 0 {
+			p.PolicyRoutingTableID = 0
 		}
 
 		// If this peer was an exit node and no longer is, cascade clear.
