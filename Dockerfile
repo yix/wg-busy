@@ -1,5 +1,7 @@
 FROM golang:1.23-alpine AS builder
 
+LABEL org.opencontainers.image.source="https://github.com/yix/wg-busy"
+
 RUN apk add --no-cache git make
 
 WORKDIR /src
