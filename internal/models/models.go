@@ -49,6 +49,7 @@ type Peer struct {
 	ExitNodeID          string    `yaml:"exitNodeID,omitempty"`
 	ExitNodeAllowAll    bool      `yaml:"exitNodeAllowAll,omitempty"`
 	ExitNodeRoutes      []string  `yaml:"exitNodeRoutes,omitempty"`
+	AdvertisedRoutes    []string  `yaml:"advertisedRoutes,omitempty"`
 	RoutingTableID      uint      `yaml:"routingTableID,omitempty"`
 	Enabled             bool      `yaml:"enabled"`
 	CreatedAt           time.Time `yaml:"createdAt"`
@@ -194,6 +195,14 @@ func (p *Peer) Validate() ValidationErrors {
 		for _, route := range p.ExitNodeRoutes {
 			if _, _, err := net.ParseCIDR(route); err != nil {
 				errs = append(errs, ValidationError{Field: "exitNodeRoutes", Message: fmt.Sprintf("invalid CIDR: %s", route)})
+			}
+		}
+	}
+
+	if len(p.AdvertisedRoutes) > 0 {
+		for _, route := range p.AdvertisedRoutes {
+			if _, _, err := net.ParseCIDR(route); err != nil {
+				errs = append(errs, ValidationError{Field: "advertisedRoutes", Message: fmt.Sprintf("invalid CIDR: %s", route)})
 			}
 		}
 	}

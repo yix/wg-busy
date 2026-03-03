@@ -140,6 +140,15 @@ var templates = template.Must(template.New("").Funcs(template.FuncMap{
             </label>
 
             <label>
+                Advertised Routes
+                <textarea name="advertisedRoutes" rows="2"
+                          placeholder="10.1.2.0/24">{{range .Peer.AdvertisedRoutes}}{{.}}
+{{end}}</textarea>
+                <small>Networks behind this peer to route through the tunnel (one CIDR per line or comma-separated).</small>
+                {{range .ValidationErrors}}{{if eq .Field "advertisedRoutes"}}<small class="field-error">{{.Message}}</small>{{end}}{{end}}
+            </label>
+
+            <label>
                 DNS (override)
                 <input type="text" name="dns" value="{{.Peer.DNS}}"
                        placeholder="Inherit from server">

@@ -171,6 +171,19 @@ func (h *handler) CreatePeer(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	var advertisedRoutes []string
+	if routesStr := strings.TrimSpace(r.FormValue("advertisedRoutes")); routesStr != "" {
+		for _, line := range strings.Split(routesStr, "\n") {
+			parts := strings.Split(line, ",")
+			for _, p := range parts {
+				p = strings.TrimSpace(p)
+				if p != "" {
+					advertisedRoutes = append(advertisedRoutes, p)
+				}
+			}
+		}
+	}
+
 	now := time.Now().UTC()
 	peer := models.Peer{
 		ID:                  uuid.New().String(),
@@ -187,6 +200,7 @@ func (h *handler) CreatePeer(w http.ResponseWriter, r *http.Request) {
 		ExitNodeID:          exitNodeID,
 		ExitNodeAllowAll:    exitNodeAllowAll,
 		ExitNodeRoutes:      exitNodeRoutes,
+		AdvertisedRoutes:    advertisedRoutes,
 		Enabled:             r.FormValue("enabled") == "on",
 		CreatedAt:           now,
 		UpdatedAt:           now,
@@ -280,6 +294,19 @@ func (h *handler) UpdatePeer(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	var advertisedRoutes []string
+	if routesStr := strings.TrimSpace(r.FormValue("advertisedRoutes")); routesStr != "" {
+		for _, line := range strings.Split(routesStr, "\n") {
+			parts := strings.Split(line, ",")
+			for _, p := range parts {
+				p = strings.TrimSpace(p)
+				if p != "" {
+					advertisedRoutes = append(advertisedRoutes, p)
+				}
+			}
+		}
+	}
+
 	writeErr := h.store.Write(func(cfg *models.AppConfig) error {
 		p := models.FindPeerByID(cfg.Peers, id)
 		if p == nil {
@@ -298,6 +325,7 @@ func (h *handler) UpdatePeer(w http.ResponseWriter, r *http.Request) {
 		p.ExitNodeID = exitNodeID
 		p.ExitNodeAllowAll = exitNodeAllowAll
 		p.ExitNodeRoutes = exitNodeRoutes
+		p.AdvertisedRoutes = advertisedRoutes
 		p.Enabled = r.FormValue("enabled") == "on"
 		p.UpdatedAt = time.Now().UTC()
 
