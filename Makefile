@@ -9,7 +9,7 @@ all: build
 
 build: ## Build the Go binary
 	@mkdir -p $(BUILD_DIR)
-	CGO_ENABLED=0 go build $(LDFLAGS) -o $(BUILD_DIR)/$(APP_NAME) .
+	GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build $(LDFLAGS) -o $(BUILD_DIR)/$(APP_NAME) .
 
 run: build ## Build and run locally
 	$(BUILD_DIR)/$(APP_NAME) -listen :8080 -config ./data/config.yaml -wg-config ./data/wg0.conf

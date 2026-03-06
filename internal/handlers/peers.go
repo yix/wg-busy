@@ -197,6 +197,8 @@ func (h *handler) CreatePeer(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	bgpEnabled, bgpPeerIP, bgpPeerPort, bgpPeerASN, bgpRouteFilters := parsePeerBGPForm(r)
+
 	now := time.Now().UTC()
 	peer := models.Peer{
 		ID:                  uuid.New().String(),
@@ -215,6 +217,11 @@ func (h *handler) CreatePeer(w http.ResponseWriter, r *http.Request) {
 		ExitNodeRoutes:      exitNodeRoutes,
 		AdvertisedRoutes:    advertisedRoutes,
 		PolicyRoutes:        policyRoutes,
+		BGPEnabled:          bgpEnabled,
+		BGPPeerIP:           bgpPeerIP,
+		BGPPeerPort:         bgpPeerPort,
+		BGPPeerASN:          bgpPeerASN,
+		BGPRouteFilters:     bgpRouteFilters,
 		Enabled:             r.FormValue("enabled") == "on",
 		CreatedAt:           now,
 		UpdatedAt:           now,
@@ -339,6 +346,8 @@ func (h *handler) UpdatePeer(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	bgpEnabled, bgpPeerIP, bgpPeerPort, bgpPeerASN, bgpRouteFilters := parsePeerBGPForm(r)
+
 	writeErr := h.store.Write(func(cfg *models.AppConfig) error {
 		p := models.FindPeerByID(cfg.Peers, id)
 		if p == nil {
@@ -359,6 +368,11 @@ func (h *handler) UpdatePeer(w http.ResponseWriter, r *http.Request) {
 		p.ExitNodeRoutes = exitNodeRoutes
 		p.AdvertisedRoutes = advertisedRoutes
 		p.PolicyRoutes = policyRoutes
+		p.BGPEnabled = bgpEnabled
+		p.BGPPeerIP = bgpPeerIP
+		p.BGPPeerPort = bgpPeerPort
+		p.BGPPeerASN = bgpPeerASN
+		p.BGPRouteFilters = bgpRouteFilters
 		p.Enabled = r.FormValue("enabled") == "on"
 		p.UpdatedAt = time.Now().UTC()
 
@@ -539,4 +553,47 @@ func (h *handler) listPeersOOB(w http.ResponseWriter, r *http.Request) {
 	if err := templates.ExecuteTemplate(w, "peers-list", data); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 	}
+}
+
+func parsePeerBGPForm(r *http.Request) (bool, string, uint16, uint32, []models.RouteFilter) {
+	bgpEnabled := r.FormValue("bgpEnabled") == "on"
+	bgpPeerIP := strings.TrimSpace(r.FormValue("bgpPeerIP"))
+
+	bgpPeerPort, _ := strconv.ParseUint(r.FormValue("bgpPeerPort"), 10, 16)
+	if bgpEnabled && bgpPeerPort == 0 {
+		bgpPeerPort = 179
+	}
+
+	bgpPeerASN, _ := strconv.ParseUint(r.FormValue("bgpPeerAsn"), 10, 32)
+	if bgpEnabled && bgpPeerASN == 0 {
+		bgpPeerASN = 64512
+	}
+
+	var bgpRouteFilters []models.RouteFilter
+	prefixes := r.Form["filterPrefix[]"]
+	matchers := r.Form["filterMatcher[]"]
+	actions := r.Form["filterAction[]"]
+
+	for i := 0; i < len(prefixes); i++ {
+		pfx := strings.TrimSpace(prefixes[i])
+		if pfx == "" {
+			continue
+		}
+		matcher := "exact"
+		if i < len(matchers) {
+			matcher = strings.TrimSpace(matchers[i])
+		}
+		action := "accept"
+		if i < len(actions) {
+			action = strings.TrimSpace(actions[i])
+		}
+
+		bgpRouteFilters = append(bgpRouteFilters, models.RouteFilter{
+			Prefix:  pfx,
+			Matcher: matcher,
+			Action:  action,
+		})
+	}
+
+	return bgpEnabled, bgpPeerIP, uint16(bgpPeerPort), uint32(bgpPeerASN), bgpRouteFilters
 }

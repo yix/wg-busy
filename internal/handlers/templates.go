@@ -229,6 +229,54 @@ var templates = template.Must(template.New("").Funcs(template.FuncMap{
                 </label>
             </div>
 
+            <fieldset>
+                <legend>BGP Overlay Settings</legend>
+                <label>
+                    <input type="checkbox" id="bgpEnabled" name="bgpEnabled" {{if .Peer.BGPEnabled}}checked{{end}} onchange="toggleBGPSettings(this)">
+                    Enable BGP
+                </label>
+                <div id="bgp-settings-config" {{if not .Peer.BGPEnabled}}style="display:none"{{end}}>
+                    <div class="grid">
+                        <label>
+                            Peer BGP IP *
+                            <input type="text" name="bgpPeerIP" value="{{.Peer.BGPPeerIP}}" placeholder="10.0.0.123" {{if .ValidationErrors.HasField "bgpPeerIP"}}aria-invalid="true"{{end}}>
+                            {{range .ValidationErrors}}{{if eq .Field "bgpPeerIP"}}<small class="field-error">{{.Message}}</small>{{end}}{{end}}
+                        </label>
+                        <label>
+                            Peer ASN *
+                            <input type="number" name="bgpPeerAsn" value="{{if .Peer.BGPPeerASN}}{{.Peer.BGPPeerASN}}{{else}}64512{{end}}" {{if .ValidationErrors.HasField "bgpPeerAsn"}}aria-invalid="true"{{end}}>
+                            {{range .ValidationErrors}}{{if eq .Field "bgpPeerAsn"}}<small class="field-error">{{.Message}}</small>{{end}}{{end}}
+                        </label>
+                        <label>
+                            Peer Port *
+                            <input type="number" name="bgpPeerPort" value="{{if .Peer.BGPPeerPort}}{{.Peer.BGPPeerPort}}{{else}}179{{end}}" {{if .ValidationErrors.HasField "bgpPeerPort"}}aria-invalid="true"{{end}}>
+                            {{range .ValidationErrors}}{{if eq .Field "bgpPeerPort"}}<small class="field-error">{{.Message}}</small>{{end}}{{end}}
+                        </label>
+                    </div>
+                    
+                    <div style="margin-top: 1rem;">
+                        <label>Route Filters</label>
+                        <div id="bgp-route-filters-list">
+                            {{range $i, $filter := .Peer.BGPRouteFilters}}
+                            <div class="route-filter-row" style="display:flex; gap:0.5rem; margin-bottom:0.5rem;">
+                                <input type="text" name="filterPrefix[]" value="{{$filter.Prefix}}" placeholder="Prefix (e.g. 10.1.0.0/16)" style="flex:1">
+                                <select name="filterMatcher[]" style="width:auto">
+                                    <option value="exact" {{if eq $filter.Matcher "exact"}}selected{{end}}>Exact</option>
+                                    <option value="orlonger" {{if eq $filter.Matcher "orlonger"}}selected{{end}}>Or Longer</option>
+                                </select>
+                                <select name="filterAction[]" style="width:auto">
+                                    <option value="accept" {{if eq $filter.Action "accept"}}selected{{end}}>Accept</option>
+                                    <option value="reject" {{if eq $filter.Action "reject"}}selected{{end}}>Reject</option>
+                                </select>
+                                <button type="button" class="secondary outline" style="color:var(--pico-del-color);border-color:var(--pico-del-color);width:auto" onclick="this.closest('.route-filter-row').remove()">X</button>
+                            </div>
+                            {{end}}
+                        </div>
+                        <button type="button" class="secondary outline" style="width:auto; margin-top:0.5rem;" onclick="addRouteFilterRow()">+ Add Filter</button>
+                    </div>
+                </div>
+            </fieldset>
+
             <footer>
                 <button type="button" class="secondary" onclick="closeModal()">Cancel</button>
                 <button type="submit">{{if .IsNew}}Create Peer{{else}}Save Changes{{end}}</button>
@@ -275,6 +323,31 @@ var templates = template.Must(template.New("").Funcs(template.FuncMap{
                 {{range .ValidationErrors}}{{if eq .Field "address"}}<small class="field-error">{{.Message}}</small>{{end}}{{end}}
             </label>
         </div>
+
+        <fieldset>
+            <legend>BGP Server Configuration</legend>
+            <label>
+                <input type="checkbox" name="bgpEnabled" {{if .Server.BGPEnabled}}checked{{end}}>
+                Enable BGP Overlay
+            </label>
+            <div class="grid">
+                <label>
+                    BGP ASN
+                    <input type="number" name="bgpAsn" value="{{if .Server.BGPASN}}{{.Server.BGPASN}}{{else}}64512{{end}}" placeholder="64512" {{if .ValidationErrors.HasField "bgpAsn"}}aria-invalid="true"{{end}}>
+                    {{range .ValidationErrors}}{{if eq .Field "bgpAsn"}}<small class="field-error">{{.Message}}</small>{{end}}{{end}}
+                </label>
+                <label>
+                    BGP Listen Address
+                    <input type="text" name="bgpListenAddress" value="{{.Server.BGPListenAddress}}" placeholder="(Optional, wg0 IP)" {{if .ValidationErrors.HasField "bgpListenAddress"}}aria-invalid="true"{{end}}>
+                    {{range .ValidationErrors}}{{if eq .Field "bgpListenAddress"}}<small class="field-error">{{.Message}}</small>{{end}}{{end}}
+                </label>
+                <label>
+                    BGP Listen Port
+                    <input type="number" name="bgpListenPort" value="{{if .Server.BGPListenPort}}{{.Server.BGPListenPort}}{{else}}179{{end}}" placeholder="179" {{if .ValidationErrors.HasField "bgpListenPort"}}aria-invalid="true"{{end}}>
+                    {{range .ValidationErrors}}{{if eq .Field "bgpListenPort"}}<small class="field-error">{{.Message}}</small>{{end}}{{end}}
+                </label>
+            </div>
+        </fieldset>
 
         <label>
             Public Endpoint

@@ -31,31 +31,52 @@ type ServerConfig struct {
 	PreDown    string `yaml:"preDown,omitempty"`
 	PostDown   string `yaml:"postDown,omitempty"`
 	SaveConfig bool   `yaml:"saveConfig,omitempty"`
+
+	// BGP
+	BGPEnabled       bool   `yaml:"bgpEnabled,omitempty"`
+	BGPListenAddress string `yaml:"bgpListenAddress,omitempty"`
+	BGPListenPort    uint16 `yaml:"bgpListenPort,omitempty"`
+	BGPASN           uint32 `yaml:"bgpAsn,omitempty"`
+}
+
+// RouteFilter represents a single routing policy filter for BGP.
+type RouteFilter struct {
+	Prefix  string `yaml:"prefix"`
+	Matcher string `yaml:"matcher"` // exact, orlonger
+	Action  string `yaml:"action"`  // accept, reject
 }
 
 // Peer represents a WireGuard peer (client).
 type Peer struct {
-	ID                   string    `yaml:"id"`
-	Name                 string    `yaml:"name"`
-	PrivateKey           string    `yaml:"privateKey"`
-	PublicKey            string    `yaml:"publicKey"`
-	PresharedKey         string    `yaml:"presharedKey,omitempty"`
-	AllowedIPs           string    `yaml:"allowedIPs"`
-	Endpoint             string    `yaml:"endpoint,omitempty"`
-	PersistentKeepalive  uint16    `yaml:"persistentKeepalive,omitempty"`
-	DNS                  string    `yaml:"dns,omitempty"`
-	ClientAllowedIPs     string    `yaml:"clientAllowedIPs,omitempty"`
-	IsExitNode           bool      `yaml:"isExitNode,omitempty"`
-	ExitNodeID           string    `yaml:"exitNodeID,omitempty"`
-	ExitNodeAllowAll     bool      `yaml:"exitNodeAllowAll,omitempty"`
-	ExitNodeRoutes       []string  `yaml:"exitNodeRoutes,omitempty"`
-	AdvertisedRoutes     []string  `yaml:"advertisedRoutes,omitempty"`
-	PolicyRoutes         []string  `yaml:"policyRoutes,omitempty"`
-	RoutingTableID       uint      `yaml:"routingTableID,omitempty"`
-	PolicyRoutingTableID uint      `yaml:"policyRoutingTableID,omitempty"`
-	Enabled              bool      `yaml:"enabled"`
-	CreatedAt            time.Time `yaml:"createdAt"`
-	UpdatedAt            time.Time `yaml:"updatedAt"`
+	ID                   string   `yaml:"id"`
+	Name                 string   `yaml:"name"`
+	PrivateKey           string   `yaml:"privateKey"`
+	PublicKey            string   `yaml:"publicKey"`
+	PresharedKey         string   `yaml:"presharedKey,omitempty"`
+	AllowedIPs           string   `yaml:"allowedIPs"`
+	Endpoint             string   `yaml:"endpoint,omitempty"`
+	PersistentKeepalive  uint16   `yaml:"persistentKeepalive,omitempty"`
+	DNS                  string   `yaml:"dns,omitempty"`
+	ClientAllowedIPs     string   `yaml:"clientAllowedIPs,omitempty"`
+	IsExitNode           bool     `yaml:"isExitNode,omitempty"`
+	ExitNodeID           string   `yaml:"exitNodeID,omitempty"`
+	ExitNodeAllowAll     bool     `yaml:"exitNodeAllowAll,omitempty"`
+	ExitNodeRoutes       []string `yaml:"exitNodeRoutes,omitempty"`
+	AdvertisedRoutes     []string `yaml:"advertisedRoutes,omitempty"`
+	PolicyRoutes         []string `yaml:"policyRoutes,omitempty"`
+	RoutingTableID       uint     `yaml:"routingTableID,omitempty"`
+	PolicyRoutingTableID uint     `yaml:"policyRoutingTableID,omitempty"`
+	Enabled              bool     `yaml:"enabled"`
+
+	// BGP
+	BGPEnabled      bool          `yaml:"bgpEnabled,omitempty"`
+	BGPPeerIP       string        `yaml:"bgpPeerIP,omitempty"`
+	BGPPeerPort     uint16        `yaml:"bgpPeerPort,omitempty"`
+	BGPPeerASN      uint32        `yaml:"bgpPeerAsn,omitempty"`
+	BGPRouteFilters []RouteFilter `yaml:"bgpRouteFilters,omitempty"`
+
+	CreatedAt time.Time `yaml:"createdAt"`
+	UpdatedAt time.Time `yaml:"updatedAt"`
 }
 
 // ValidationError represents a single field validation error.
@@ -136,6 +157,18 @@ func (s *ServerConfig) Validate() ValidationErrors {
 	}
 	if len(s.PostDown) > 4096 {
 		errs = append(errs, ValidationError{Field: "postDown", Message: "maximum 4096 characters"})
+	}
+
+	if s.BGPEnabled {
+		if s.BGPListenAddress != "" && net.ParseIP(s.BGPListenAddress) == nil {
+			errs = append(errs, ValidationError{Field: "bgpListenAddress", Message: "must be a valid IP address"})
+		}
+		if s.BGPListenPort == 0 {
+			errs = append(errs, ValidationError{Field: "bgpListenPort", Message: "must be > 0"})
+		}
+		if s.BGPASN == 0 {
+			errs = append(errs, ValidationError{Field: "bgpAsn", Message: "required when BGP is enabled"})
+		}
 	}
 
 	return errs
@@ -221,6 +254,36 @@ func (p *Peer) Validate() ValidationErrors {
 			}
 			if net.ParseIP(strings.TrimSpace(parts[1])) == nil {
 				errs = append(errs, ValidationError{Field: "policyRoutes", Message: fmt.Sprintf("invalid Gateway IP: %s", parts[1])})
+			}
+		}
+	}
+
+	if p.BGPEnabled {
+		if p.BGPPeerIP == "" {
+			errs = append(errs, ValidationError{Field: "bgpPeerIP", Message: "required when BGP is enabled"})
+		} else if net.ParseIP(p.BGPPeerIP) == nil {
+			errs = append(errs, ValidationError{Field: "bgpPeerIP", Message: "must be a valid IP address"})
+		}
+		if p.BGPPeerPort == 0 {
+			errs = append(errs, ValidationError{Field: "bgpPeerPort", Message: "must be > 0"})
+		}
+		if p.BGPPeerASN == 0 {
+			errs = append(errs, ValidationError{Field: "bgpPeerAsn", Message: "required when BGP is enabled"})
+		}
+
+		for i, filter := range p.BGPRouteFilters {
+			if filter.Prefix == "" {
+				errs = append(errs, ValidationError{Field: fmt.Sprintf("bgpRouteFilters[%d].prefix", i), Message: "required"})
+			} else if _, _, err := net.ParseCIDR(filter.Prefix); err != nil {
+				errs = append(errs, ValidationError{Field: fmt.Sprintf("bgpRouteFilters[%d].prefix", i), Message: "invalid CIDR"})
+			}
+
+			if filter.Matcher != "exact" && filter.Matcher != "orlonger" {
+				errs = append(errs, ValidationError{Field: fmt.Sprintf("bgpRouteFilters[%d].matcher", i), Message: "must be 'exact' or 'orlonger'"})
+			}
+
+			if filter.Action != "accept" && filter.Action != "reject" {
+				errs = append(errs, ValidationError{Field: fmt.Sprintf("bgpRouteFilters[%d].action", i), Message: "must be 'accept' or 'reject'"})
 			}
 		}
 	}

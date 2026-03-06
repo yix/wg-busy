@@ -9,6 +9,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
+	"github.com/yix/wg-busy/internal/bgp"
 	"github.com/yix/wg-busy/internal/models"
 	"github.com/yix/wg-busy/internal/routing"
 	"github.com/yix/wg-busy/internal/wireguard"
@@ -52,6 +53,10 @@ func Load(configPath, wgConfigPath string) (*Store, error) {
 		return nil, fmt.Errorf("parsing config: %w", err)
 	}
 
+	if err := bgp.Configure(&s.config); err != nil {
+		log.Printf("configuring bgp: %v", err)
+	}
+
 	return s, nil
 }
 
@@ -77,6 +82,10 @@ func (s *Store) Write(fn func(cfg *models.AppConfig) error) error {
 
 	if err := s.renderWGConfig(); err != nil {
 		return fmt.Errorf("rendering wg config: %w", err)
+	}
+
+	if err := bgp.Configure(&s.config); err != nil {
+		log.Printf("configuring bgp: %v", err)
 	}
 
 	if err := wireguard.ReloadWGConfig(); err != nil {

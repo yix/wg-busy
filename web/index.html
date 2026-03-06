@@ -335,6 +335,35 @@
             }
         }
 
+        function toggleBGPSettings(checkbox) {
+            var bgpSettings = document.getElementById('bgp-settings-config');
+            if (bgpSettings) {
+                bgpSettings.style.display = checkbox.checked ? '' : 'none';
+            }
+        }
+
+        function addRouteFilterRow() {
+            var list = document.getElementById('bgp-route-filters-list');
+            if (!list) return;
+
+            var div = document.createElement('div');
+            div.className = 'route-filter-row';
+            div.style.cssText = 'display:flex; gap:0.5rem; margin-bottom:0.5rem;';
+            div.innerHTML = `
+                <input type="text" name="filterPrefix[]" value="" placeholder="Prefix (e.g. 10.1.0.0/16)" style="flex:1">
+                <select name="filterMatcher[]" style="width:auto">
+                    <option value="exact">Exact</option>
+                    <option value="orlonger">Or Longer</option>
+                </select>
+                <select name="filterAction[]" style="width:auto">
+                    <option value="accept">Accept</option>
+                    <option value="reject">Reject</option>
+                </select>
+                <button type="button" class="secondary outline" style="color:var(--pico-del-color);border-color:var(--pico-del-color);width:auto" onclick="this.closest('.route-filter-row').remove()">X</button>
+            `;
+            list.appendChild(div);
+        }
+
         function isValidCIDRList(s) {
             return s.split(',').every(function (part) {
                 var cidr = part.trim();

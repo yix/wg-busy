@@ -55,6 +55,19 @@ func (h *handler) UpdateServerConfig(w http.ResponseWriter, r *http.Request) {
 		cfg.Server.PostDown = r.FormValue("postDown")
 		cfg.Server.SaveConfig = r.FormValue("saveConfig") == "on"
 
+		cfg.Server.BGPEnabled = r.FormValue("bgpEnabled") == "on"
+		cfg.Server.BGPListenAddress = strings.TrimSpace(r.FormValue("bgpListenAddress"))
+		if bgpPort, err := strconv.ParseUint(r.FormValue("bgpListenPort"), 10, 16); err == nil {
+			cfg.Server.BGPListenPort = uint16(bgpPort)
+		} else if cfg.Server.BGPEnabled && cfg.Server.BGPListenPort == 0 {
+			cfg.Server.BGPListenPort = 179
+		}
+		if bgpAsn, err := strconv.ParseUint(r.FormValue("bgpAsn"), 10, 32); err == nil {
+			cfg.Server.BGPASN = uint32(bgpAsn)
+		} else if cfg.Server.BGPEnabled && cfg.Server.BGPASN == 0 {
+			cfg.Server.BGPASN = 64512
+		}
+
 		if errs := cfg.Server.Validate(); len(errs) > 0 {
 			return errs
 		}
