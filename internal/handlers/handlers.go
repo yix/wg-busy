@@ -41,6 +41,9 @@ func NewRouter(store *config.Store, webFS fs.FS, stats *wgstats.Collector) *http
 	mux.HandleFunc("GET /server", h.GetServerConfig)
 	mux.HandleFunc("PUT /server", h.UpdateServerConfig)
 
+	// BGP stats fragment.
+	mux.HandleFunc("GET /bgp/stats", h.GetBGPStatsTab)
+
 	// API endpoints.
 	mux.HandleFunc("GET /api/peers/{id}/config", h.DownloadClientConfig)
 	mux.HandleFunc("GET /api/peers/{id}/qr", h.QRCode)

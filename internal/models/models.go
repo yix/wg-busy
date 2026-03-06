@@ -79,6 +79,34 @@ type Peer struct {
 	UpdatedAt time.Time `yaml:"updatedAt"`
 }
 
+// BGPRoute represents a single received component in the BGP AdjRIBIn.
+type BGPRoute struct {
+	Prefix       string `json:"prefix"`
+	NextHop      string `json:"nextHop"`
+	LocalPref    uint32 `json:"localPref"`
+	ASPath       string `json:"asPath"`
+	IsHidden     bool   `json:"isHidden"`
+	HiddenReason string `json:"hiddenReason"`
+}
+
+// BGPPeerStats holds statistics and received prefixes for a single BGP peer.
+type BGPPeerStats struct {
+	IP              string     `json:"ip"`
+	ASN             uint32     `json:"asn"`
+	State           string     `json:"state"`
+	Uptime          string     `json:"uptime"`
+	UpdatesReceived uint64     `json:"updatesReceived"`
+	Routes          []BGPRoute `json:"routes"`
+}
+
+// BGPStats aggregates all BGP statistics for the daemon.
+type BGPStats struct {
+	RouterID string         `json:"routerId"`
+	ASN      uint32         `json:"asn"`
+	Running  bool           `json:"running"`
+	Peers    []BGPPeerStats `json:"peers"`
+}
+
 // ValidationError represents a single field validation error.
 type ValidationError struct {
 	Field   string

@@ -417,4 +417,98 @@ var templates = template.Must(template.New("").Funcs(template.FuncMap{
     </form>
 </div>
 {{end}}
+
+{{define "bgp-stats"}}
+<div id="bgp-stats">
+    <div class="header-row">
+        <h2>BGP Statistics</h2>
+    </div>
+
+    {{if not .Running}}
+    <article class="toast toast-error">
+        BGP Service is currently disabled or not started. Enable it in the Server Configuration.
+    </article>
+    {{else}}
+    <div class="grid" style="margin-bottom: 2rem;">
+        <article>
+            <header><strong>Router ID</strong></header>
+            {{.RouterID}}
+        </article>
+        <article>
+            <header><strong>Local ASN</strong></header>
+            {{.ASN}}
+        </article>
+        <article>
+            <header><strong>Service Status</strong></header>
+            <span class="status-dot status-up"></span> Running
+        </article>
+    </div>
+
+    <h3>BGP Peers</h3>
+    {{if not .Peers}}
+    <p>No BGP peers configured.</p>
+    {{else}}
+    {{range .Peers}}
+    <article style="margin-bottom: 2rem;">
+        <header style="display: flex; justify-content: space-between; align-items: center;">
+            <strong>{{.IP}} (AS{{.ASN}})</strong>
+            <span>
+                {{if eq .State "Established"}}
+                <span class="status-dot status-up"></span> {{.State}} &middot; Uptime: {{.Uptime}}
+                {{else}}
+                <span class="status-dot status-down"></span> {{.State}}
+                {{end}}
+            </span>
+        </header>
+
+        <p><small>Updates Received: {{.UpdatesReceived}} &middot; Prefixes Received: {{len .Routes}}</small></p>
+
+        {{if .Routes}}
+        <details>
+            <summary>View Received Routes ({{len .Routes}})</summary>
+            <figure>
+                <table role="grid">
+                    <thead>
+                        <tr>
+                            <th scope="col">Prefix</th>
+                            <th scope="col">Next Hop</th>
+                            <th scope="col">Local Pref</th>
+                            <th scope="col">AS Path</th>
+                            <th scope="col">Status</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {{range $i, $route := .Routes}}
+                        <tr {{if $route.IsHidden}}style="color: var(--pico-del-color); opacity: 0.8;"{{end}} {{if gt $i 9}}class="expanded-route hidden-route"{{end}}>
+                            <td>{{$route.Prefix}}</td>
+                            <td>{{$route.NextHop}}</td>
+                            <td>{{$route.LocalPref}}</td>
+                            <td>{{if $route.ASPath}}{{$route.ASPath}}{{else}}Local{{end}}</td>
+                            <td>
+                                {{if $route.IsHidden}}
+                                <span title="{{$route.HiddenReason}}">Denied ({{$route.HiddenReason}})</span>
+                                {{else}}
+                                <span>Accepted</span>
+                                {{end}}
+                            </td>
+                        </tr>
+                        {{end}}
+                    </tbody>
+                </table>
+            </figure>
+            {{if gt (len .Routes) 10}}
+            <button class="outline secondary" onclick="this.style.display='none'; Array.from(this.previousElementSibling.querySelectorAll('.hidden-route')).forEach(function(el){el.style.display='table-row'});">Show All {{len .Routes}} Routes</button>
+            <style>
+                .hidden-route { display: none; }
+            </style>
+            {{end}}
+        </details>
+        {{end}}
+
+    </article>
+    {{end}}
+    {{end}}
+    {{end}}
+</div>
+{{end}}
 `))

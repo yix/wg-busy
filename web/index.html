@@ -282,6 +282,10 @@
             <button role="tab" hx-get="server" hx-target="#tab-content" hx-swap="innerHTML" onclick="selectTab(this)">
                 Server
             </button>
+            <button id="tab-bgp" role="tab" hx-get="bgp/stats" hx-target="#tab-content" hx-swap="innerHTML"
+                onclick="selectTab(this)">
+                BGP
+            </button>
         </div>
 
         <div id="tab-content" hx-get="peers" hx-trigger="load" hx-swap="innerHTML">
