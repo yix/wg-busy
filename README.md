@@ -18,6 +18,7 @@ WG-Busy is a web-based UI for managing a WireGuard server. It is inspired by pro
   - **Advertised Routes**: Expose networks behind a peer to the VPN.
   - **Policy Routing**: Define custom routes with specific gateways (`CIDR via IP`) per peer, automatically managing Linux policy routing tables.
 - **Real-time Stats**: Live bandwidth usage, sparkline graphs, and connection status.
+- **Dynamic BGP Routing**: Native `bio-rd` integration for automated route advertisement and learning right into the Linux kernel routing table, complete with a BGP dashboard and per-peer route filters.
 - **QR Codes**: Generate configuration QR codes for mobile clients.
 
 > [!WARNING]
@@ -85,6 +86,16 @@ One of WG-Busy's key features is the ability to define complex routing topologie
 -   **Policy Routes**: Configure explicit `CIDR via Gateway IP` rules per client. All traffic matching the CIDR and originating from that client will be directed to a dedicated policy routing table and pushed out the specified gateway.
 
 This is implemented using Linux policy routing (`ip rule` and custom routing tables), which WG-Busy manages automatically in the `PostUp`/`PostDown` hooks.
+
+### Dynamic BGP Routing via bio-rd
+
+WG-Busy integrates deeply with `bio-rd` to provide a seamless BGP routing daemon working alongside WireGuard:
+
+- **Server BGP Configuration**: Enable BGP globally and configure the local BGP ASN and Listen addresses directly from the UI.
+- **Per-Peer Sessions**: Turn any WireGuard client into a BGP peer by providing their overlay BGP IP, ASN, and Port.
+- **Strict Route Filtering**: Dynamically attach "Exact" or "Or Longer" route filters to accept or reject received BGP announcements individually per peer.
+- **Kernel Route Injection**: Accepted routes are immediately injected natively into the Linux host routing table (LocRIB), enabling zero-touch routing configurations.
+- **BGP Dashboard**: A dedicated BGP stats tab displaying real-time peer connection states, uptimes, updates received, and color-coded expandable tables of prefixes detailing why any specific prefix was Accepted or Denied.
 
 ## Development
 
