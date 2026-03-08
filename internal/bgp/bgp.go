@@ -2,6 +2,7 @@ package bgp
 
 import (
 	"fmt"
+	"log"
 	"strings"
 	"sync"
 	"time"
@@ -12,6 +13,7 @@ import (
 	"github.com/bio-routing/bio-rd/routingtable/filter"
 	"github.com/bio-routing/bio-rd/routingtable/filter/actions"
 	"github.com/bio-routing/bio-rd/routingtable/vrf"
+	biolog "github.com/bio-routing/bio-rd/util/log"
 
 	"github.com/yix/wg-busy/internal/models"
 )
@@ -30,18 +32,25 @@ func Configure(cfg *models.AppConfig) error {
 	defer mu.Unlock()
 
 	if !cfg.Server.BGPEnabled {
+		if bgpSrv != nil {
+			log.Println("[BGP] BGP is disabled in config — stopping BGP server")
+		}
 		return stop()
 	}
 
 	if bgpSrv == nil {
+		log.Printf("[BGP] Starting BGP server: ASN=%d listen=%s:%d",
+			cfg.Server.BGPASN, cfg.Server.BGPListenAddress, cfg.Server.BGPListenPort)
 		if err := start(cfg.Server); err != nil {
+			log.Printf("[BGP ERROR] Failed to start BGP server: %v", err)
 			return err
 		}
 	} else if bgpSrv.RouterID() != cfg.Server.BGPASN {
-		// bio-rd router ID cannot (easily) be changed on the fly without restarting the server.
-		// For simplicity, we restart the BGP server if RouterID changes.
+		log.Printf("[BGP] Router ID changed (%d → %d), restarting BGP server",
+			bgpSrv.RouterID(), cfg.Server.BGPASN)
 		_ = stop()
 		if err := start(cfg.Server); err != nil {
+			log.Printf("[BGP ERROR] Failed to restart BGP server: %v", err)
 			return err
 		}
 	}
@@ -58,6 +67,7 @@ func Configure(cfg *models.AppConfig) error {
 
 		bPeerIP, err := bnet.IPFromString(p.BGPPeerIP)
 		if err != nil {
+			log.Printf("[BGP WARN] Peer %q: invalid BGP peer IP %q: %v — skipping", p.Name, p.BGPPeerIP, err)
 			continue
 		}
 
@@ -76,11 +86,13 @@ func Configure(cfg *models.AppConfig) error {
 		if cfg.Server.BGPListenAddress != "" {
 			if lA, err := bnet.IPFromString(cfg.Server.BGPListenAddress); err == nil {
 				peerCfg.LocalAddress = &lA
+			} else {
+				log.Printf("[BGP WARN] Invalid BGP listen address %q: %v", cfg.Server.BGPListenAddress, err)
 			}
 		}
 
 		importFilter := buildFilterChain(p.BGPRouteFilters)
-		exportFilter := filter.NewAcceptAllFilterChain() // For simplicity, export all local routing entries
+		exportFilter := filter.NewAcceptAllFilterChain()
 
 		afi := &server.AddressFamilyConfig{
 			ImportFilterChain: importFilter,
@@ -93,6 +105,9 @@ func Configure(cfg *models.AppConfig) error {
 			peerCfg.IPv6 = afi
 		}
 
+		log.Printf("[BGP] Desired peer: name=%q ip=%s localAS=%d peerAS=%d filters=%d",
+			p.Name, bPeerIP.String(), cfg.Server.BGPASN, p.BGPPeerASN, len(p.BGPRouteFilters))
+
 		desiredPeers[bPeerIP] = peerCfg
 	}
 
@@ -102,6 +117,7 @@ func Configure(cfg *models.AppConfig) error {
 		// Remove stale peers
 		for _, cp := range currentPeers {
 			if _, ok := desiredPeers[*cp.Addr()]; !ok {
+				log.Printf("[BGP] Removing peer %s (no longer in config)", cp.Addr().String())
 				bgpSrv.DisposePeer(cp.VRF(), cp.Addr())
 			}
 		}
@@ -112,20 +128,39 @@ func Configure(cfg *models.AppConfig) error {
 			oldCfg := bgpSrv.GetPeerConfig(defVRF, &bPeerCopy)
 			if oldCfg != nil {
 				if oldCfg.NeedsRestart(&pCfg) {
+					log.Printf("[BGP] Peer %s config changed — restarting session", bPeerCopy.String())
 					bgpSrv.DisposePeer(defVRF, &bPeerCopy)
-					_ = bgpSrv.AddPeer(pCfg)
+					if err := bgpSrv.AddPeer(pCfg); err != nil {
+						log.Printf("[BGP ERROR] Failed to re-add peer %s: %v", bPeerCopy.String(), err)
+					} else {
+						log.Printf("[BGP] Peer %s re-added successfully", bPeerCopy.String())
+					}
 				} else {
+					log.Printf("[BGP] Peer %s: updating import/export filter chains", bPeerCopy.String())
 					if pCfg.IPv4 != nil {
-						_ = bgpSrv.ReplaceImportFilterChain(defVRF, &bPeerCopy, pCfg.IPv4.ImportFilterChain)
-						_ = bgpSrv.ReplaceExportFilterChain(defVRF, &bPeerCopy, pCfg.IPv4.ExportFilterChain)
+						if err := bgpSrv.ReplaceImportFilterChain(defVRF, &bPeerCopy, pCfg.IPv4.ImportFilterChain); err != nil {
+							log.Printf("[BGP ERROR] Peer %s: failed to replace IPv4 import filter: %v", bPeerCopy.String(), err)
+						}
+						if err := bgpSrv.ReplaceExportFilterChain(defVRF, &bPeerCopy, pCfg.IPv4.ExportFilterChain); err != nil {
+							log.Printf("[BGP ERROR] Peer %s: failed to replace IPv4 export filter: %v", bPeerCopy.String(), err)
+						}
 					}
 					if pCfg.IPv6 != nil {
-						_ = bgpSrv.ReplaceImportFilterChain(defVRF, &bPeerCopy, pCfg.IPv6.ImportFilterChain)
-						_ = bgpSrv.ReplaceExportFilterChain(defVRF, &bPeerCopy, pCfg.IPv6.ExportFilterChain)
+						if err := bgpSrv.ReplaceImportFilterChain(defVRF, &bPeerCopy, pCfg.IPv6.ImportFilterChain); err != nil {
+							log.Printf("[BGP ERROR] Peer %s: failed to replace IPv6 import filter: %v", bPeerCopy.String(), err)
+						}
+						if err := bgpSrv.ReplaceExportFilterChain(defVRF, &bPeerCopy, pCfg.IPv6.ExportFilterChain); err != nil {
+							log.Printf("[BGP ERROR] Peer %s: failed to replace IPv6 export filter: %v", bPeerCopy.String(), err)
+						}
 					}
 				}
 			} else {
-				_ = bgpSrv.AddPeer(pCfg)
+				log.Printf("[BGP] Adding new peer %s (AS%d)", bPeerCopy.String(), pCfg.PeerAS)
+				if err := bgpSrv.AddPeer(pCfg); err != nil {
+					log.Printf("[BGP ERROR] Failed to add peer %s: %v", bPeerCopy.String(), err)
+				} else {
+					log.Printf("[BGP] Peer %s added, initiating connection", bPeerCopy.String())
+				}
 			}
 		}
 	}
@@ -134,15 +169,24 @@ func Configure(cfg *models.AppConfig) error {
 }
 
 func start(cfg models.ServerConfig) error {
+	// Wire bio-rd's internal logger to Go's std logger so FSM transitions,
+	// OPEN/NOTIFICATION messages, and TCP events are visible in wg-busy logs.
+	biolog.SetLogger(newStdLogger())
+
 	vrfReg = vrf.NewVRFRegistry()
 	defVRF := vrfReg.CreateVRFIfNotExists(vrf.DefaultVRFName, 0)
 
-	listenAddrsByVRF := map[string][]string{}
 	listenAddr := cfg.BGPListenAddress
 	if listenAddr == "" {
 		listenAddr = "[::]"
+		log.Printf("[BGP] No listen address configured, defaulting to all interfaces (%s)", listenAddr)
 	}
-	listenAddrsByVRF[vrf.DefaultVRFName] = []string{fmt.Sprintf("%s:%d", listenAddr, cfg.BGPListenPort)}
+	listenAddrsByVRF := map[string][]string{
+		vrf.DefaultVRFName: {fmt.Sprintf("%s:%d", listenAddr, cfg.BGPListenPort)},
+	}
+
+	log.Printf("[BGP] Creating BGP server: routerID=%d listenAddr=%s:%d",
+		cfg.BGPASN, listenAddr, cfg.BGPListenPort)
 
 	srvCfg := server.BGPServerConfig{
 		RouterID:         cfg.BGPASN,
@@ -152,8 +196,10 @@ func start(cfg models.ServerConfig) error {
 
 	bgpSrv = server.NewBGPServer(srvCfg)
 	bgpSrv.Start()
+	log.Println("[BGP] BGP server started, listening for incoming connections")
 
 	// Initialize Kernel routing module to auto-inject learned routes into main table.
+	log.Println("[BGP] Initialising kernel route integration")
 	k, err := kernel.New()
 	if err != nil {
 		return fmt.Errorf("failed to init kernel routing: %w", err)
@@ -162,37 +208,43 @@ func start(cfg models.ServerConfig) error {
 
 	defVRF.IPv4UnicastRIB().Register(kSrv)
 	defVRF.IPv6UnicastRIB().Register(kSrv)
+	log.Println("[BGP] Kernel route integration active — learned routes will be installed in the main routing table")
 
 	return nil
 }
 
 func stop() error {
 	if kSrv != nil {
+		log.Println("[BGP] Deregistering kernel route integration")
 		kSrv.Dispose()
 		kSrv = nil
 	}
-	// bio-rd BGPServer doesn't have a clean global Stop() method currently exposed in its interface.
-	// For now, we clear the references allowing GC and resource drops.
-	// To cleanly stop, one would typically stop listeners or dispose of the VRF/peers.
 	if bgpSrv != nil {
-		for _, cp := range bgpSrv.GetPeers() {
+		peers := bgpSrv.GetPeers()
+		log.Printf("[BGP] Stopping BGP server — disposing %d peer(s)", len(peers))
+		for _, cp := range peers {
+			log.Printf("[BGP] Disposing peer %s", cp.Addr().String())
 			bgpSrv.DisposePeer(cp.VRF(), cp.Addr())
 		}
 		bgpSrv = nil
 	}
 	vrfReg = nil
+	log.Println("[BGP] BGP server stopped")
 	return nil
 }
 
 func buildFilterChain(filters []models.RouteFilter) filter.Chain {
 	if len(filters) == 0 {
+		log.Println("[BGP] No route filters configured — accepting all prefixes (accept-all policy)")
 		return filter.NewAcceptAllFilterChain()
 	}
 
+	log.Printf("[BGP] Building filter chain with %d term(s)", len(filters))
 	var terms []*filter.Term
 	for i, f := range filters {
 		pfx, err := bnet.PrefixFromString(f.Prefix)
 		if err != nil {
+			log.Printf("[BGP WARN] Filter term %d: invalid prefix %q: %v — skipping", i, f.Prefix, err)
 			continue
 		}
 
@@ -213,10 +265,13 @@ func buildFilterChain(filters []models.RouteFilter) filter.Chain {
 			action = &actions.RejectAction{}
 		}
 
-		terms = append(terms, filter.NewTerm(fmt.Sprintf("term-%d", i), []*filter.TermCondition{termCond}, []actions.Action{action}))
+		termName := fmt.Sprintf("term-%d", i)
+		log.Printf("[BGP] Filter term %q: prefix=%s matcher=%s action=%s", termName, f.Prefix, f.Matcher, f.Action)
+		terms = append(terms, filter.NewTerm(termName, []*filter.TermCondition{termCond}, []actions.Action{action}))
 	}
 
-	// Implicit reject at the end, typical for route policies if no match.
+	// Implicit reject at the end — anything not matched above is denied.
+	log.Println("[BGP] Filter chain: implicit default-reject at end of chain")
 	terms = append(terms, filter.NewTerm("default-reject", []*filter.TermCondition{}, []actions.Action{&actions.RejectAction{}}))
 
 	return filter.Chain{filter.NewFilter("dynamic-filter", terms)}
