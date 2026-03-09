@@ -96,6 +96,7 @@ func Configure(cfg *models.AppConfig) error {
 		peerCfg := server.PeerConfig{
 			AdminEnabled:      true,
 			Passive:           true, // wg-busy only responds; peers must initiate
+			TTL:               255,  // eBGP multihop over WireGuard tunnel
 			ReconnectInterval: 15 * time.Second,
 			KeepAlive:         30 * time.Second,
 			HoldTime:          90 * time.Second,
@@ -122,11 +123,10 @@ func Configure(cfg *models.AppConfig) error {
 			ExportFilterChain: exportFilter,
 		}
 
-		if bPeerIP.IsIPv4() {
-			peerCfg.IPv4 = afi
-		} else {
-			peerCfg.IPv6 = afi
-		}
+		// Always enable both IPv4 and IPv6 unicast so peers can
+		// advertise routes of either family over a single session.
+		peerCfg.IPv4 = afi
+		peerCfg.IPv6 = afi
 
 		log.Printf("[BGP] Desired peer: name=%q ip=%s localAS=%d peerAS=%d filters=%d",
 			p.Name, bPeerIP.String(), cfg.Server.BGPASN, p.BGPPeerASN, len(p.BGPRouteFilters))

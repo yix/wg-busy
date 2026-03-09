@@ -1,6 +1,7 @@
 package bgp
 
 import (
+	"log"
 	"time"
 
 	bnet "github.com/bio-routing/bio-rd/net"
@@ -48,26 +49,41 @@ func GetBGPStats() *models.BGPStats {
 
 	res.Running = true
 	res.RouterID = bnet.IPv4(bgpSrv.RouterID()).String()
-	res.ASN = bgpSrv.RouterID() // RouterID is typically derived from or matching the local ASN in this config. We could use local config ASN if provided, but let's stick to RouterID for simplicity unless we have access to the config from here.
+	res.ASN = bgpSrv.RouterID()
 
 	metrics, err := bgpSrv.Metrics()
 	if err != nil || metrics == nil {
+		log.Printf("[BGP STATS] Metrics() returned err=%v metrics=%v", err, metrics)
 		return res
 	}
 
 	defVRF := vrfReg.GetVRFByName(vrf.DefaultVRFName)
 
 	for _, pm := range metrics.Peers {
+		stateStr := bgpStateToString(pm.State)
+
+		// Aggregate route counts from AddressFamilies (more reliable than
+		// FSM-level counters which can read the wrong FSM after reconnections).
+		var totalRoutesReceived, totalRoutesSent uint64
+		for _, af := range pm.AddressFamilies {
+			totalRoutesReceived += af.RoutesReceived
+			totalRoutesSent += af.RoutesSent
+		}
+
+		log.Printf("[BGP STATS] Peer %s: state=%d(%s) updatesRx=%d updatesTx=%d afCount=%d routesRx=%d routesTx=%d since=%v",
+			pm.IP.String(), pm.State, stateStr,
+			pm.UpdatesReceived, pm.UpdatesSent,
+			len(pm.AddressFamilies), totalRoutesReceived, totalRoutesSent, pm.Since)
+
 		peerStat := models.BGPPeerStats{
 			IP:              pm.IP.String(),
 			ASN:             pm.ASN,
-			State:           bgpStateToString(pm.State),
+			State:           stateStr,
 			UpdatesReceived: pm.UpdatesReceived,
 			Routes:          make([]models.BGPRoute, 0),
 		}
 
 		if !pm.Since.IsZero() && pm.State == 6 {
-			// Calculate uptime
 			d := time.Since(pm.Since).Truncate(time.Second)
 			peerStat.Uptime = d.String()
 		} else {
