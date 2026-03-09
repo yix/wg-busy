@@ -49,7 +49,7 @@ func GetBGPStats() *models.BGPStats {
 
 	res.Running = true
 	res.RouterID = bnet.IPv4(bgpSrv.RouterID()).String()
-	res.ASN = bgpSrv.RouterID()
+	res.ASN = localASN
 
 	metrics, err := bgpSrv.Metrics()
 	if err != nil || metrics == nil {

@@ -21,10 +21,11 @@ import (
 )
 
 var (
-	mu     sync.Mutex
-	bgpSrv server.BGPServer
-	vrfReg *vrf.VRFRegistry
-	kSrv   *kernel.Kernel
+	mu       sync.Mutex
+	bgpSrv   server.BGPServer
+	vrfReg   *vrf.VRFRegistry
+	kSrv     *kernel.Kernel
+	localASN uint32
 )
 
 // routerIDFromAddress parses a WireGuard address CIDR (e.g. "10.0.0.1/24") and
@@ -195,6 +196,8 @@ func start(cfg models.ServerConfig, routerID uint32) error {
 	// Wire bio-rd's internal logger to Go's std logger so FSM transitions,
 	// OPEN/NOTIFICATION messages, and TCP events are visible in wg-busy logs.
 	biolog.SetLogger(newStdLogger())
+
+	localASN = cfg.BGPASN
 
 	vrfReg = vrf.NewVRFRegistry()
 	defVRF := vrfReg.CreateVRFIfNotExists(vrf.DefaultVRFName, 0)
