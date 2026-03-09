@@ -53,10 +53,6 @@ func Load(configPath, wgConfigPath string) (*Store, error) {
 		return nil, fmt.Errorf("parsing config: %w", err)
 	}
 
-	if err := bgp.Configure(&s.config); err != nil {
-		log.Printf("configuring bgp: %v", err)
-	}
-
 	return s, nil
 }
 

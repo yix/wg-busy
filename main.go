@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"time"
 
+	"github.com/yix/wg-busy/internal/bgp"
 	"github.com/yix/wg-busy/internal/config"
 	"github.com/yix/wg-busy/internal/handlers"
 	"github.com/yix/wg-busy/internal/models"
@@ -55,6 +56,15 @@ func main() {
 	} else {
 		wgStartedAt = time.Now()
 		log.Printf("WireGuard interface wg0 is up")
+
+		// BGP must start after wg0 is up so the listener can bind to the
+		// WireGuard interface IP. On failure we log and continue — the
+		// operator can save the server config via the UI to retry.
+		store.Read(func(cfg *models.AppConfig) {
+			if err := bgp.Configure(cfg); err != nil {
+				log.Printf("BGP configure error: %v", err)
+			}
+		})
 	}
 
 	// Start stats collector.
