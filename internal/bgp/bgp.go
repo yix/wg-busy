@@ -1,8 +1,10 @@
 package bgp
 
 import (
+	"encoding/binary"
 	"fmt"
 	"log"
+	"net"
 	"strings"
 	"sync"
 	"time"
@@ -25,6 +27,22 @@ var (
 	kSrv   *kernel.Kernel
 )
 
+// routerIDFromAddress parses a WireGuard address CIDR (e.g. "10.0.0.1/24") and
+// returns the host IP encoded as a uint32 suitable for use as a BGP Router ID.
+func routerIDFromAddress(cidr string) (uint32, error) {
+	// Address may be comma-separated; take the first entry.
+	cidr = strings.TrimSpace(strings.SplitN(cidr, ",", 2)[0])
+	ip, _, err := net.ParseCIDR(cidr)
+	if err != nil {
+		return 0, fmt.Errorf("parse wg address %q: %w", cidr, err)
+	}
+	ip4 := ip.To4()
+	if ip4 == nil {
+		return 0, fmt.Errorf("BGP Router ID requires an IPv4 address, got %q", ip.String())
+	}
+	return binary.BigEndian.Uint32(ip4), nil
+}
+
 // Configure applies the given application configuration to the bio-rd BGP server instance.
 // It starts, stops, or reconfigures the BGP environment and peers accordingly.
 func Configure(cfg *models.AppConfig) error {
@@ -38,18 +56,22 @@ func Configure(cfg *models.AppConfig) error {
 		return stop()
 	}
 
+	routerID, err := routerIDFromAddress(cfg.Server.Address)
+	if err != nil {
+		return fmt.Errorf("cannot derive BGP Router ID from WireGuard address: %w", err)
+	}
 	if bgpSrv == nil {
-		log.Printf("[BGP] Starting BGP server: ASN=%d listen=%s:%d",
+		log.Printf("[BGP] Starting BGP server: routerID=%s ASN=%d listen=%s:%d",
+			net.IP(binary.BigEndian.AppendUint32(nil, routerID)).String(),
 			cfg.Server.BGPASN, cfg.Server.BGPListenAddress, cfg.Server.BGPListenPort)
-		if err := start(cfg.Server); err != nil {
+		if err := start(cfg.Server, routerID); err != nil {
 			log.Printf("[BGP ERROR] Failed to start BGP server: %v", err)
 			return err
 		}
-	} else if bgpSrv.RouterID() != cfg.Server.BGPASN {
-		log.Printf("[BGP] Router ID changed (%d → %d), restarting BGP server",
-			bgpSrv.RouterID(), cfg.Server.BGPASN)
+	} else if bgpSrv.RouterID() != routerID {
+		log.Printf("[BGP] Router ID changed — restarting BGP server")
 		_ = stop()
-		if err := start(cfg.Server); err != nil {
+		if err := start(cfg.Server, routerID); err != nil {
 			log.Printf("[BGP ERROR] Failed to restart BGP server: %v", err)
 			return err
 		}
@@ -73,13 +95,14 @@ func Configure(cfg *models.AppConfig) error {
 
 		peerCfg := server.PeerConfig{
 			AdminEnabled:      true,
+			Passive:           true, // wg-busy only responds; peers must initiate
 			ReconnectInterval: 15 * time.Second,
 			KeepAlive:         30 * time.Second,
 			HoldTime:          90 * time.Second,
 			PeerAddress:       &bPeerIP,
 			LocalAS:           cfg.Server.BGPASN,
 			PeerAS:            p.BGPPeerASN,
-			RouterID:          cfg.Server.BGPASN,
+			RouterID:          routerID,
 			VRF:               defVRF,
 		}
 
@@ -168,7 +191,7 @@ func Configure(cfg *models.AppConfig) error {
 	return nil
 }
 
-func start(cfg models.ServerConfig) error {
+func start(cfg models.ServerConfig, routerID uint32) error {
 	// Wire bio-rd's internal logger to Go's std logger so FSM transitions,
 	// OPEN/NOTIFICATION messages, and TCP events are visible in wg-busy logs.
 	biolog.SetLogger(newStdLogger())
@@ -185,11 +208,12 @@ func start(cfg models.ServerConfig) error {
 		vrf.DefaultVRFName: {fmt.Sprintf("%s:%d", listenAddr, cfg.BGPListenPort)},
 	}
 
-	log.Printf("[BGP] Creating BGP server: routerID=%d listenAddr=%s:%d",
+	log.Printf("[BGP] Creating BGP server: routerID=%s ASN=%d listenAddr=%s:%d",
+		net.IP(binary.BigEndian.AppendUint32(nil, routerID)).String(),
 		cfg.BGPASN, listenAddr, cfg.BGPListenPort)
 
 	srvCfg := server.BGPServerConfig{
-		RouterID:         cfg.BGPASN,
+		RouterID:         routerID,
 		DefaultVRF:       defVRF,
 		ListenAddrsByVRF: listenAddrsByVRF,
 	}
