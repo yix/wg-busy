@@ -17,8 +17,9 @@ WG-Busy is a web-based UI for managing a WireGuard server. It is inspired by pro
   - **Split Tunneling**: Configure exit nodes to route all traffic or only specific subnets.
   - **Advertised Routes**: Expose networks behind a peer to the VPN.
   - **Policy Routing**: Define custom routes with specific gateways (`CIDR via IP`) per peer, automatically managing Linux policy routing tables.
-- **Real-time Stats**: Live bandwidth usage, sparkline graphs, and connection status.
-- **Dynamic BGP Routing**: Native `bio-rd` integration for automated route advertisement and learning right into the Linux kernel routing table, complete with a BGP dashboard and per-peer route filters.
+- **Real-time Stats**: Live bandwidth usage, sparkline graphs, connection status, and actual peer endpoint (IP:port) display.
+- **Dynamic BGP Routing**: Native `bio-rd` integration with dual-stack (IPv4 + IPv6) support for automated route advertisement and learning right into the Linux kernel routing table, complete with a BGP dashboard and per-peer route filters.
+- **Multi-Architecture**: Pre-built Docker images for both `linux/amd64` and `linux/arm64`.
 - **QR Codes**: Generate configuration QR codes for mobile clients.
 
 > [!WARNING]
@@ -33,14 +34,17 @@ The easiest way to run WG-Busy is using Docker Compose.
 ```yaml
 services:
   wg-busy:
-    image: ghcr.io/yix/wg-busy:latest # Replace with actual image if available
+    image: ghcr.io/yix/wg-busy:latest
     container_name: wg-busy
+    security_opt:
+      - systempaths=unconfined
     cap_add:
       - NET_ADMIN
       - SYS_MODULE
     sysctls:
       - net.ipv4.ip_forward=1
       - net.ipv4.conf.all.src_valid_mark=1
+      - net.ipv6.conf.all.disable_ipv6=0
     ports:
       - "8080:8080"       # Web UI
       - "51820:51820/udp" # WireGuard
@@ -93,14 +97,17 @@ WG-Busy integrates deeply with `bio-rd` to provide a seamless BGP routing daemon
 
 - **Server BGP Configuration**: Enable BGP globally and configure the local BGP ASN and Listen addresses directly from the UI.
 - **Per-Peer Sessions**: Turn any WireGuard client into a BGP peer by providing their overlay BGP IP, ASN, and Port.
+- **Dual-Stack Support**: Both IPv4 and IPv6 address families are negotiated over a single BGP session, allowing peers to advertise routes of either family.
 - **Strict Route Filtering**: Dynamically attach "Exact" or "Or Longer" route filters to accept or reject received BGP announcements individually per peer.
 - **Kernel Route Injection**: Accepted routes are immediately injected natively into the Linux host routing table (LocRIB), enabling zero-touch routing configurations.
-- **BGP Dashboard**: A dedicated BGP stats tab displaying real-time peer connection states, uptimes, updates received, and color-coded expandable tables of prefixes detailing why any specific prefix was Accepted or Denied.
+- **BGP Dashboard**: A dedicated BGP stats tab displaying real-time peer connection states, uptimes, updates received, and expandable route tables showing each prefix as **Accepted** or **Filtered** (with accepted routes sorted first and filtered routes visually faded).
 
 ## Development
 
 -   `make dev`: Run locally (requires macOS/Linux with Go). Note that WireGuard interface management commands will fail on non-Linux systems or without sudo.
--   `make build`: Compile the binary.
+-   `make build`: Cross-compile binaries for both `linux/amd64` and `linux/arm64`.
+-   `make build-amd64`: Compile the `linux/amd64` binary only.
+-   `make build-arm64`: Compile the `linux/arm64` binary only.
 -   `make docker-build`: Build the Docker image.
 
 ## License
