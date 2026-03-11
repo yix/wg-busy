@@ -479,17 +479,13 @@ var templates = template.Must(template.New("").Funcs(template.FuncMap{
                     </thead>
                     <tbody>
                         {{range $i, $route := .Routes}}
-                        <tr {{if $route.IsHidden}}style="color: var(--pico-del-color); opacity: 0.8;"{{end}} {{if gt $i 9}}class="expanded-route hidden-route"{{end}}>
+                        <tr {{if ne $route.Status "Accepted"}}style="color: var(--pico-del-color); opacity: 0.8;"{{end}} {{if gt $i 9}}class="expanded-route hidden-route"{{end}}>
                             <td>{{$route.Prefix}}</td>
                             <td>{{$route.NextHop}}</td>
                             <td>{{$route.LocalPref}}</td>
                             <td>{{if $route.ASPath}}{{$route.ASPath}}{{else}}Local{{end}}</td>
                             <td>
-                                {{if $route.IsHidden}}
-                                <span title="{{$route.HiddenReason}}">Denied ({{$route.HiddenReason}})</span>
-                                {{else}}
-                                <span>Accepted</span>
-                                {{end}}
+                                <span>{{$route.Status}}</span>
                             </td>
                         </tr>
                         {{end}}

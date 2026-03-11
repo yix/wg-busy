@@ -81,12 +81,11 @@ type Peer struct {
 
 // BGPRoute represents a single received component in the BGP AdjRIBIn.
 type BGPRoute struct {
-	Prefix       string `json:"prefix"`
-	NextHop      string `json:"nextHop"`
-	LocalPref    uint32 `json:"localPref"`
-	ASPath       string `json:"asPath"`
-	IsHidden     bool   `json:"isHidden"`
-	HiddenReason string `json:"hiddenReason"`
+	Prefix    string `json:"prefix"`
+	NextHop   string `json:"nextHop"`
+	LocalPref uint32 `json:"localPref"`
+	ASPath    string `json:"asPath"`
+	Status    string `json:"status"` // "Accepted" or "Filtered"
 }
 
 // BGPPeerStats holds statistics and received prefixes for a single BGP peer.

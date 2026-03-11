@@ -91,18 +91,24 @@ func GetBGPStats() *models.BGPStats {
 		}
 
 		if pm.State == 6 {
+			locRIBv4 := defVRF.IPv4UnicastRIB()
+			locRIBv6 := defVRF.IPv6UnicastRIB()
+
 			// AFI 1 (IPv4), SAFI 1 (Unicast)
 			ribv4 := bgpSrv.GetRIBIn(defVRF, pm.IP, packet.AFIIPv4, packet.SAFIUnicast)
 			if ribv4 != nil {
 				for _, r := range ribv4.Dump() {
+					status := "Filtered"
+					if locRIBv4 != nil && locRIBv4.Get(r.Prefix()) != nil {
+						status = "Accepted"
+					}
 					for _, p := range r.Paths() {
 						peerStat.Routes = append(peerStat.Routes, models.BGPRoute{
-							Prefix:       r.Prefix().String(),
-							NextHop:      p.NextHop().String(),
-							LocalPref:    p.BGPPath.BGPPathA.LocalPref,
-							ASPath:       p.BGPPath.ASPath.String(),
-							IsHidden:     p.IsHidden(),
-							HiddenReason: p.HiddenReasonString(),
+							Prefix:    r.Prefix().String(),
+							NextHop:   p.NextHop().String(),
+							LocalPref: p.BGPPath.BGPPathA.LocalPref,
+							ASPath:    p.BGPPath.ASPath.String(),
+							Status:    status,
 						})
 					}
 				}
@@ -112,14 +118,17 @@ func GetBGPStats() *models.BGPStats {
 			ribv6 := bgpSrv.GetRIBIn(defVRF, pm.IP, packet.AFIIPv6, packet.SAFIUnicast)
 			if ribv6 != nil {
 				for _, r := range ribv6.Dump() {
+					status := "Filtered"
+					if locRIBv6 != nil && locRIBv6.Get(r.Prefix()) != nil {
+						status = "Accepted"
+					}
 					for _, p := range r.Paths() {
 						peerStat.Routes = append(peerStat.Routes, models.BGPRoute{
-							Prefix:       r.Prefix().String(),
-							NextHop:      p.NextHop().String(),
-							LocalPref:    p.BGPPath.BGPPathA.LocalPref,
-							ASPath:       p.BGPPath.ASPath.String(),
-							IsHidden:     p.IsHidden(),
-							HiddenReason: p.HiddenReasonString(),
+							Prefix:    r.Prefix().String(),
+							NextHop:   p.NextHop().String(),
+							LocalPref: p.BGPPath.BGPPathA.LocalPref,
+							ASPath:    p.BGPPath.ASPath.String(),
+							Status:    status,
 						})
 					}
 				}
