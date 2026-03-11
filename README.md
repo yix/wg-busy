@@ -8,6 +8,9 @@ WG-Busy is a web-based UI for managing a WireGuard server. It is inspired by pro
 ![Docker](https://img.shields.io/badge/docker-%230db7ed.svg?style=flat&logo=docker&logoColor=white)
 [![Build and Push Multi-Arch Image](https://github.com/yix/wg-busy/actions/workflows/build-and-push.yaml/badge.svg)](https://github.com/yix/wg-busy/actions/workflows/build-and-push.yaml)
 
+> [!NOTE]
+> **WG-Busy is in early development.** Features may be incomplete, rough around the edges, or behave unexpectedly in certain environments. If you run into any issues or have ideas for improvement, please [open an issue](https://github.com/yix/wg-busy/issues) — feedback is very much appreciated and helps shape the project.
+
 ## Features
 
 - **Geek Friendly**: Single Go binary, no complex dependencies. Uses `htmx` and `pico.css` for a fast, lightweight UI.
