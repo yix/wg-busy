@@ -102,6 +102,36 @@ WG-Busy integrates deeply with `bio-rd` to provide a seamless BGP routing daemon
 - **Kernel Route Injection**: Accepted routes are immediately injected natively into the Linux host routing table (LocRIB), enabling zero-touch routing configurations.
 - **BGP Dashboard**: A dedicated BGP stats tab displaying real-time peer connection states, uptimes, updates received, and expandable route tables showing each prefix as **Accepted** or **Filtered** (with accepted routes sorted first and filtered routes visually faded).
 
+
+### Sample BGP configuration on Mikrotik
+
+```
+# 64000 - WG-Busy ASN
+# 64001 - Mikrotik ASN
+# 10.1.2.1 - WG-Busy BGP IP
+# 10.1.2.3 - Mikrotik BGP IP
+
+/routing bgp instance
+add as=64001 disabled=no name=my-router router-id=10.1.2.3 routing-table=main
+
+/routing bgp connection
+add afi=ip as=64001 connect=yes disabled=no instance=my-router local.role=ebgp name=wg-busy output.filter-chain=wg-busy-out .keep-sent-attributes=yes .redistribute=connected,static remote.address=10.1.2.1 .as=64000 routing-table=main
+
+# a list of allowed networks used in the bgp filter, if you would like to restrict advertised prefixes
+/ip firewall address-list
+# list will match exact network - 10.10.0.0/24 and longer prefixes, such as 10.10.0.1/32, 10.10.0.0/25, etc.
+add address=10.10.0.0/24 list=wg-busy-out-allowed
+add address=10.10.5.0/24 list=wg-busy-out-allowed
+
+/routing filter rule
+# match using an adress-list
+add chain=wg-busy-out rule="if (dst in wg-busy-out-allowed) {accept}"
+# match using a specific prefix, matches exact prefix unlike above ^^^
+add chain=wg-busy-out rule="if (dst == 192.168.10.0/24) {accept}"
+# reject all prefixes not matched by previous rules
+add chain=wg-busy-out rule=reject
+```
+
 ## Development
 
 -   `make dev`: Run locally (requires macOS/Linux with Go). Note that WireGuard interface management commands will fail on non-Linux systems or without sudo.
