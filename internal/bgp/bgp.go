@@ -95,17 +95,18 @@ func Configure(cfg *models.AppConfig) error {
 		}
 
 		peerCfg := server.PeerConfig{
-			AdminEnabled:      true,
-			Passive:           true, // wg-busy only responds; peers must initiate
-			TTL:               255,  // eBGP multihop over WireGuard tunnel
-			ReconnectInterval: 15 * time.Second,
-			KeepAlive:         30 * time.Second,
-			HoldTime:          90 * time.Second,
-			PeerAddress:       &bPeerIP,
-			LocalAS:           cfg.Server.BGPASN,
-			PeerAS:            p.BGPPeerASN,
-			RouterID:          routerID,
-			VRF:               defVRF,
+			AdminEnabled:               true,
+			Passive:                    true, // wg-busy only responds; peers must initiate
+			TTL:                        255,  // eBGP multihop over WireGuard tunnel
+			ReconnectInterval:          15 * time.Second,
+			KeepAlive:                  30 * time.Second,
+			HoldTime:                   90 * time.Second,
+			PeerAddress:                &bPeerIP,
+			LocalAS:                    cfg.Server.BGPASN,
+			PeerAS:                     p.BGPPeerASN,
+			RouterID:                   routerID,
+			VRF:                        defVRF,
+			AdvertiseIPv4MultiProtocol: true, // Required to negotiate IPv4 AFI over IPv6 sessions
 		}
 
 		if cfg.Server.BGPListenAddress != "" {
