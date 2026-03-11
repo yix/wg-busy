@@ -2,6 +2,7 @@ package bgp
 
 import (
 	"log"
+	"sort"
 	"time"
 
 	bnet "github.com/bio-routing/bio-rd/net"
@@ -134,6 +135,11 @@ func GetBGPStats() *models.BGPStats {
 				}
 			}
 		}
+
+		// Sort: Accepted routes first, Filtered last.
+		sort.Slice(peerStat.Routes, func(i, j int) bool {
+			return peerStat.Routes[i].Status == "Accepted" && peerStat.Routes[j].Status != "Accepted"
+		})
 
 		res.Peers = append(res.Peers, peerStat)
 	}

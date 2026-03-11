@@ -480,7 +480,7 @@ var templates = template.Must(template.New("").Funcs(template.FuncMap{
                     </thead>
                     <tbody>
                         {{range $i, $route := .Routes}}
-                        <tr {{if ne $route.Status "Accepted"}}style="color: var(--pico-del-color); opacity: 0.8;"{{end}} {{if gt $i 9}}class="expanded-route hidden-route"{{end}}>
+                        <tr {{if ne $route.Status "Accepted"}}style="opacity: 0.45;"{{end}} {{if gt $i 9}}class="expanded-route hidden-route"{{end}}>
                             <td>{{$route.Prefix}}</td>
                             <td>{{$route.NextHop}}</td>
                             <td>{{$route.LocalPref}}</td>
