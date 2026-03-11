@@ -77,6 +77,16 @@ jobs:
             type=raw,value=latest,enable=${{ github.ref == 'refs/heads/master' }}
             type=raw,value=${{ steps.tag_version.outputs.new_tag }}
 
+      # Set up Go and cross-compile binaries for all target architectures
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Build Go binaries (amd64 + arm64)
+        run: make build
+
       # Build and push the image
       - name: Build and push
         uses: docker/build-push-action@v5

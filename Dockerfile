@@ -1,17 +1,6 @@
-FROM golang:1.23-alpine AS builder
+FROM alpine:3.20
 
 LABEL org.opencontainers.image.source="https://github.com/yix/wg-busy"
-
-RUN apk add --no-cache git make
-
-WORKDIR /src
-COPY go.mod go.sum ./
-RUN go mod download
-
-COPY . .
-RUN make build
-
-FROM alpine:3.20
 
 RUN apk add --no-cache \
     wireguard-tools \
@@ -22,7 +11,8 @@ RUN apk add --no-cache \
 
 WORKDIR /app
 
-COPY --from=builder /src/bin/wg-busy /app/wg-busy
+ARG TARGETARCH
+COPY bin/wg-busy-${TARGETARCH} /app/wg-busy
 
 RUN mkdir -p /app/data /etc/wireguard
 
