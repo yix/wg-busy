@@ -48,6 +48,7 @@ var templates = template.Must(template.New("").Funcs(template.FuncMap{
             {{if .Peer.IsExitNode}}<span class="badge badge-exit">Exit Node</span>{{end}}
             {{if .ExitNodeName}}<span class="badge badge-via">via {{.ExitNodeName}}</span>{{end}}
         </strong>
+        {{if .Endpoint}}<div style="font-size:0.8em;font-weight:normal;opacity:0.7;margin-top:0.1em">({{.Endpoint}})</div>{{end}}
         <small id="peer-stats-{{.Peer.ID}}">
            {{template "peer-stats" .}}
         </small>

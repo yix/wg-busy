@@ -20,6 +20,7 @@ import (
 type peerRowData struct {
 	Peer         models.Peer
 	ExitNodeName string
+	Endpoint     string
 	TransferRx   string
 	TransferTx   string
 	CurrentRxPS  string
@@ -74,6 +75,7 @@ func (h *handler) buildPeersListData() peersListData {
 		if allPeerStats != nil {
 			if ps, ok := allPeerStats[p.PublicKey]; ok {
 				row.HasStats = true
+				row.Endpoint = ps.Endpoint
 				row.TransferRx = wgstats.FormatBytes(ps.TransferRx)
 				row.TransferTx = wgstats.FormatBytes(ps.TransferTx)
 				row.CurrentRxPS = wgstats.FormatBytesPerSec(ps.CurrentRxPS)
@@ -504,6 +506,7 @@ func (h *handler) TogglePeer(w http.ResponseWriter, r *http.Request) {
 	if h.stats != nil {
 		if ps := h.stats.GetPeerStats(peer.PublicKey); ps != nil {
 			data.HasStats = true
+			data.Endpoint = ps.Endpoint
 			data.TransferRx = wgstats.FormatBytes(ps.TransferRx)
 			data.TransferTx = wgstats.FormatBytes(ps.TransferTx)
 			data.Handshake = wgstats.FormatHandshake(ps.LatestHandshake)
