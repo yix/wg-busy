@@ -125,7 +125,7 @@ var templates = template.Must(template.New("").Funcs(template.FuncMap{
             </label>
 
             <label>
-                Allowed IPs
+                Client IP
                 <input type="text" name="allowedIPs" value="{{.Peer.AllowedIPs}}"
                        placeholder="Auto-assign (leave empty)"
                        {{if .ValidationErrors.HasField "allowedIPs"}}aria-invalid="true"{{end}}>
@@ -134,7 +134,7 @@ var templates = template.Must(template.New("").Funcs(template.FuncMap{
             </label>
 
             <label>
-                Client Allowed IPs
+                Allowed Client IPs
                 <input type="text" name="clientAllowedIPs" value="{{if .Peer.ClientAllowedIPs}}{{.Peer.ClientAllowedIPs}}{{else}}0.0.0.0/0, ::/0{{end}}"
                        placeholder="0.0.0.0/0, ::/0">
                 <small>Routes the client sends through the tunnel.</small>
@@ -237,6 +237,9 @@ var templates = template.Must(template.New("").Funcs(template.FuncMap{
                     Enable BGP
                 </label>
                 <div id="bgp-settings-config" {{if not .Peer.BGPEnabled}}style="display:none"{{end}}>
+                    <label>
+                        <input type="checkbox" name="bgpConnect" {{if .Peer.BGPConnect}}checked{{end}} title="Actively initiate connection to the peer"> Connect
+                    </label>
                     <div class="grid">
                         <label>
                             Peer BGP IP *

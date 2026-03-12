@@ -96,8 +96,9 @@ func Configure(cfg *models.AppConfig) error {
 
 		peerCfg := server.PeerConfig{
 			AdminEnabled:               true,
-			Passive:                    true, // wg-busy only responds; peers must initiate
-			TTL:                        255,  // eBGP multihop over WireGuard tunnel
+			AuthenticationKey:          "",            // TODO: add support for preshared keys
+			Passive:                    !p.BGPConnect, // by default wg-busy only responds; peers must initiate
+			TTL:                        255,           // eBGP multihop over WireGuard tunnel
 			ReconnectInterval:          15 * time.Second,
 			KeepAlive:                  30 * time.Second,
 			HoldTime:                   90 * time.Second,

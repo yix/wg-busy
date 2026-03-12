@@ -70,6 +70,7 @@ type Peer struct {
 
 	// BGP
 	BGPEnabled      bool          `yaml:"bgpEnabled,omitempty"`
+	BGPConnect      bool          `yaml:"bgpConnect,omitempty"`
 	BGPPeerIP       string        `yaml:"bgpPeerIP,omitempty"`
 	BGPPeerPort     uint16        `yaml:"bgpPeerPort,omitempty"`
 	BGPPeerASN      uint32        `yaml:"bgpPeerAsn,omitempty"`

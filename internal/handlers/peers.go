@@ -199,7 +199,7 @@ func (h *handler) CreatePeer(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	bgpEnabled, bgpPeerIP, bgpPeerPort, bgpPeerASN, bgpRouteFilters := parsePeerBGPForm(r)
+	bgpEnabled, bgpConnect, bgpPeerIP, bgpPeerPort, bgpPeerASN, bgpRouteFilters := parsePeerBGPForm(r)
 
 	now := time.Now().UTC()
 	peer := models.Peer{
@@ -220,6 +220,7 @@ func (h *handler) CreatePeer(w http.ResponseWriter, r *http.Request) {
 		AdvertisedRoutes:    advertisedRoutes,
 		PolicyRoutes:        policyRoutes,
 		BGPEnabled:          bgpEnabled,
+		BGPConnect:          bgpConnect,
 		BGPPeerIP:           bgpPeerIP,
 		BGPPeerPort:         bgpPeerPort,
 		BGPPeerASN:          bgpPeerASN,
@@ -348,7 +349,7 @@ func (h *handler) UpdatePeer(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	bgpEnabled, bgpPeerIP, bgpPeerPort, bgpPeerASN, bgpRouteFilters := parsePeerBGPForm(r)
+	bgpEnabled, bgpConnect, bgpPeerIP, bgpPeerPort, bgpPeerASN, bgpRouteFilters := parsePeerBGPForm(r)
 
 	writeErr := h.store.Write(func(cfg *models.AppConfig) error {
 		p := models.FindPeerByID(cfg.Peers, id)
@@ -371,6 +372,7 @@ func (h *handler) UpdatePeer(w http.ResponseWriter, r *http.Request) {
 		p.AdvertisedRoutes = advertisedRoutes
 		p.PolicyRoutes = policyRoutes
 		p.BGPEnabled = bgpEnabled
+		p.BGPConnect = bgpConnect
 		p.BGPPeerIP = bgpPeerIP
 		p.BGPPeerPort = bgpPeerPort
 		p.BGPPeerASN = bgpPeerASN
@@ -558,8 +560,9 @@ func (h *handler) listPeersOOB(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func parsePeerBGPForm(r *http.Request) (bool, string, uint16, uint32, []models.RouteFilter) {
+func parsePeerBGPForm(r *http.Request) (bool, bool, string, uint16, uint32, []models.RouteFilter) {
 	bgpEnabled := r.FormValue("bgpEnabled") == "on"
+	bgpConnect := r.FormValue("bgpConnect") == "on"
 	bgpPeerIP := strings.TrimSpace(r.FormValue("bgpPeerIP"))
 
 	bgpPeerPort, _ := strconv.ParseUint(r.FormValue("bgpPeerPort"), 10, 16)
@@ -598,5 +601,5 @@ func parsePeerBGPForm(r *http.Request) (bool, string, uint16, uint32, []models.R
 		})
 	}
 
-	return bgpEnabled, bgpPeerIP, uint16(bgpPeerPort), uint32(bgpPeerASN), bgpRouteFilters
+	return bgpEnabled, bgpConnect, bgpPeerIP, uint16(bgpPeerPort), uint32(bgpPeerASN), bgpRouteFilters
 }
