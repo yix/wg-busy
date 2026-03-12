@@ -42,7 +42,7 @@ clean: ## Remove build artifacts
 docker-build: ## Build Docker image
 	docker build -t $(APP_NAME):$(VERSION) -t $(APP_NAME):latest .
 
-docker-run: docker-build ## Build and run in Docker with WireGuard capabilities
+docker-run: build docker-build ## Build and run in Docker with WireGuard capabilities
 	docker run --rm -it \
 		--cap-add NET_ADMIN \
 		--cap-add SYS_MODULE \
