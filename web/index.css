@@ -36,25 +36,23 @@
   --transition: 0.2s ease-in-out;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --bg-color: #0f172a;
-    --text-main: #f8fafc;
-    --text-muted: #94a3b8;
-    --card-bg: #1e293b;
-    --border-color: #334155;
-    
-    --primary: #3b82f6;
-    --primary-hover: #60a5fa;
-    --primary-text: #ffffff;
-    
-    --secondary: #334155;
-    --secondary-hover: #475569;
-    --secondary-text: #cbd5e1;
-    
-    --input-bg: #1e293b;
-    --input-border: #475569;
-  }
+[data-theme="dark"] {
+  --bg-color: #0f172a;
+  --text-main: #f8fafc;
+  --text-muted: #94a3b8;
+  --card-bg: #1e293b;
+  --border-color: #334155;
+  
+  --primary: #3b82f6;
+  --primary-hover: #60a5fa;
+  --primary-text: #ffffff;
+  
+  --secondary: #334155;
+  --secondary-hover: #475569;
+  --secondary-text: #cbd5e1;
+  
+  --input-bg: #1e293b;
+  --input-border: #475569;
 }
 
 * {

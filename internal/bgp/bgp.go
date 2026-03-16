@@ -117,6 +117,11 @@ func Configure(cfg *models.AppConfig) error {
 				log.Printf("[BGP WARN] Invalid BGP listen address %q: %v", cfg.Server.BGPListenAddress, err)
 			}
 		}
+		if peerCfg.LocalAddress == nil {
+			// bio-rd panics if LocalAddress is nil. Default to generic unspec IPv6 which covers all interfaces.
+			unspec, _ := bnet.IPFromString("::")
+			peerCfg.LocalAddress = &unspec
+		}
 
 		importFilter := buildFilterChain(p.BGPRouteFilters)
 		exportFilter := filter.NewAcceptAllFilterChain()
