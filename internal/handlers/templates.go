@@ -28,7 +28,7 @@ var templates = template.Must(template.New("").Funcs(template.FuncMap{
 <div id="peers-list" {{if .OOB}}hx-swap-oob="true"{{end}}>
     <div class="header-row">
         <h2>Peers ({{len .Peers}})</h2>
-        <button hx-get="peers/new" hx-target="#modal-container" hx-swap="innerHTML">+ Add Peer</button>
+        <button class="btn btn-primary" hx-get="peers/new" hx-target="#modal-container" hx-swap="innerHTML">+ Add Peer</button>
     </div>
     {{if not .Peers}}
     <p>No peers configured. Add one to get started.</p>
@@ -54,19 +54,19 @@ var templates = template.Must(template.New("").Funcs(template.FuncMap{
         </small>
     </div>
     <div class="peer-actions">
-        <button class="outline secondary qr-btn" title="QR Code"
+        <button class="btn btn-outline secondary qr-btn" title="QR Code"
                 hx-get="peers/{{.Peer.ID}}/qr" hx-target="#modal-container" hx-swap="innerHTML">
             <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M0 0h7v7H0V0zm1 1v5h5V1H1zm1 1h3v3H2V2zm8-2h7v7H10V0zm1 1v5h5V1h-5zm1 1h3v3h-3V2zM0 10h7v6H0v-6zm1 1v4h5v-4H1zm1 1h3v2H2v-2zm8-2h2v2h-2v-2zm3 0h3v2h-3v-2zm-3 3h2v3h-2v-3zm3 0h1v1h-1v-1zm2 0h1v1h-1v-1zm2 0h1v3h-1v-3zm-2 2h1v1h-1v-1z"/></svg>
         </button>
-        <a href="api/peers/{{.Peer.ID}}/config" download role="button" class="outline secondary">Download</a>
-        <button class="outline" hx-get="peers/{{.Peer.ID}}/edit" hx-target="#modal-container" hx-swap="innerHTML">Edit</button>
-        <button class="outline secondary"
+        <a href="api/peers/{{.Peer.ID}}/config" download role="button" class="btn btn-outline secondary">Download</a>
+        <button class="btn btn-outline" hx-get="peers/{{.Peer.ID}}/edit" hx-target="#modal-container" hx-swap="innerHTML">Edit</button>
+        <button class="btn btn-outline secondary"
                 hx-put="peers/{{.Peer.ID}}/toggle"
                 hx-target="#peer-{{.Peer.ID}}"
                 hx-swap="outerHTML">
             {{if .Peer.Enabled}}Disable{{else}}Enable{{end}}
         </button>
-        <button class="outline" style="color:var(--pico-del-color);border-color:var(--pico-del-color)"
+        <button class="btn btn-outline-danger"
                 hx-delete="peers/{{.Peer.ID}}"
                 hx-target="#tab-content"
                 hx-swap="innerHTML"
@@ -87,9 +87,9 @@ var templates = template.Must(template.New("").Funcs(template.FuncMap{
 {{define "qr-modal"}}
 <dialog>
     <article>
-        <header>
-            <button aria-label="Close" rel="prev" onclick="closeModal()"></button>
-            <p><strong>QR Code &mdash; {{.Name}}</strong></p>
+        <header class="flex-row">
+            <p class="mb-0"><strong>QR Code &mdash; {{.Name}}</strong></p>
+            <button aria-label="Close" class="btn btn-outline secondary mb-0" style="padding: 0.1rem 0.6rem" onclick="closeModal()">X</button>
         </header>
         <div style="text-align:center">
             <img src="api/peers/{{.ID}}/qr" alt="QR Code for {{.Name}}" width="256" height="256"
@@ -97,7 +97,7 @@ var templates = template.Must(template.New("").Funcs(template.FuncMap{
             <p><small>Scan with the WireGuard mobile app to import this peer configuration.</small></p>
         </div>
         <footer>
-            <button type="button" onclick="closeModal()">Close</button>
+            <button type="button" class="btn btn-secondary" onclick="closeModal()">Close</button>
         </footer>
     </article>
 </dialog>
@@ -106,9 +106,9 @@ var templates = template.Must(template.New("").Funcs(template.FuncMap{
 {{define "peer-form"}}
 <dialog>
     <article>
-        <header>
-            <button aria-label="Close" rel="prev" onclick="closeModal()"></button>
-            <p><strong>{{if .IsNew}}Add Peer{{else}}Edit Peer{{end}}</strong></p>
+        <header class="flex-row">
+            <p class="mb-0"><strong>{{if .IsNew}}Add Peer{{else}}Edit Peer{{end}}</strong></p>
+            <button aria-label="Close" class="btn btn-outline secondary mb-0" style="padding: 0.1rem 0.6rem" onclick="closeModal()">X</button>
         </header>
         <form {{if .IsNew}}hx-post="peers"{{else}}hx-put="peers/{{.Peer.ID}}"{{end}}
               hx-target="#modal-container" hx-swap="innerHTML"
@@ -272,18 +272,18 @@ var templates = template.Must(template.New("").Funcs(template.FuncMap{
                                     <option value="accept" {{if eq $filter.Action "accept"}}selected{{end}}>Accept</option>
                                     <option value="reject" {{if eq $filter.Action "reject"}}selected{{end}}>Reject</option>
                                 </select>
-                                <button type="button" class="secondary outline" style="color:var(--pico-del-color);border-color:var(--pico-del-color);width:auto" onclick="this.closest('.route-filter-row').remove()">X</button>
+                                <button type="button" class="btn btn-outline-danger" style="width:auto" onclick="this.closest('.route-filter-row').remove()">X</button>
                             </div>
                             {{end}}
                         </div>
-                        <button type="button" class="secondary outline" style="width:auto; margin-top:0.5rem;" onclick="addRouteFilterRow()">+ Add Filter</button>
+                        <button type="button" class="btn btn-outline secondary" style="width:auto; margin-top:0.5rem;" onclick="addRouteFilterRow()">+ Add Filter</button>
                     </div>
                 </div>
             </fieldset>
 
             <footer>
-                <button type="button" class="secondary" onclick="closeModal()">Cancel</button>
-                <button type="submit">{{if .IsNew}}Create Peer{{else}}Save Changes{{end}}</button>
+                <button type="button" class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+                <button type="submit" class="btn btn-primary">{{if .IsNew}}Create Peer{{else}}Save Changes{{end}}</button>
             </footer>
         </form>
     </article>
@@ -295,8 +295,8 @@ var templates = template.Must(template.New("").Funcs(template.FuncMap{
     <div class="header-row">
         <h2>Server Configuration</h2>
         <div class="btn-group">
-            <a href="api/server/config" download role="button" class="outline secondary">Download wg0.conf</a>
-            <button hx-post="api/server/apply" hx-target="#apply-result" hx-swap="innerHTML"
+            <a href="api/server/config" download role="button" class="btn btn-outline secondary">Download wg0.conf</a>
+            <button class="btn btn-primary" hx-post="api/server/apply" hx-target="#apply-result" hx-swap="innerHTML"
                     hx-confirm="Apply configuration? This will restart the WireGuard interface.">
                 Apply Config
             </button>
@@ -417,7 +417,7 @@ var templates = template.Must(template.New("").Funcs(template.FuncMap{
             <code style="word-break:break-all;">{{.Server.PrivateKey}}</code>
         </details>
 
-        <button type="submit">Save Configuration</button>
+        <button type="submit" class="btn btn-primary">Save Configuration</button>
     </form>
 </div>
 {{end}}
@@ -497,7 +497,7 @@ var templates = template.Must(template.New("").Funcs(template.FuncMap{
                 </table>
             </figure>
             {{if gt (len .Routes) 10}}
-            <button class="outline secondary" onclick="this.style.display='none'; Array.from(this.previousElementSibling.querySelectorAll('.hidden-route')).forEach(function(el){el.style.display='table-row'});">Show All {{len .Routes}} Routes</button>
+            <button class="btn btn-outline secondary" onclick="this.style.display='none'; Array.from(this.previousElementSibling.querySelectorAll('.hidden-route')).forEach(function(el){el.style.display='table-row'});">Show All {{len .Routes}} Routes</button>
             <style>
                 .hidden-route { display: none; }
             </style>

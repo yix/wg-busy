@@ -13,7 +13,7 @@ WG-Busy is a web-based UI for managing a WireGuard server. It is inspired by pro
 
 ## Features
 
-- **Geek Friendly**: Single Go binary, no complex dependencies. Uses `htmx` and `pico.css` for a fast, lightweight UI.
+- **Geek Friendly**: Single Go binary, no complex dependencies. Uses `htmx` and custom CSS for a fast, lightweight UI.
 - **Full Control**: Persistence via YAML, but renders standard `wg0.conf` files. You can customize `PostUp`/`PostDown` scripts and other advanced settings directly.
 - **Advanced Routing**:
   - **Flexible Exit Nodes**: Any peer can be an exit node for any other peer.

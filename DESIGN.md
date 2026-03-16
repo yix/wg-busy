@@ -1,15 +1,15 @@
 # WG-Busy Design Document
 
-WireGuard server management web UI. Go backend serving a single HTML page using htmx and pico.css. YAML config persistence, rendered to WireGuard .conf on every change. Exit node routing via Linux policy routing.
+WireGuard server management web UI. Go backend serving a single HTML page using htmx and custom CSS. YAML config persistence, rendered to WireGuard .conf on every change. Exit node routing via Linux policy routing.
 
 ## Architecture
 
 ```
 ┌─────────────────────────────────────────────────┐
 │  Browser (Single HTML Page)                     │
-│  ┌───────────┐  ┌───────────┐                   │
-│  │ Peers Tab │  │Server Tab │   htmx + pico.css │
-│  └─────┬─────┘  └─────┬─────┘                   │
+│  ┌───────────┐  ┌───────────┐  ┌───────────┐    │
+│  │ Peers Tab │  │Server Tab │  │ BGP Tab   │    │
+│  └─────┬─────┘  └─────┬─────┘  └─────┬─────┘    │
 │        │               │                         │
 │   HTML fragments via htmx (no full reloads)      │
 └────────┼───────────────┼─────────────────────────┘
@@ -59,7 +59,7 @@ wg-busy/
 │       ├── export.go             # Download/apply config
 │       └── stats.go              # Stats bar + QR code handlers
 ├── web/
-│   └── index.html                # Single page: htmx + pico.css (CDN)
+│   └── index.html                # Single page: htmx + custom css
 ├── Dockerfile                    # Multi-stage: build + alpine runtime
 ├── docker-compose.yml            # Sample compose with all WireGuard settings
 └── Makefile                      # build, run, dev, test, docker-*
@@ -279,9 +279,9 @@ Single HTML page with two tabs controlled by htmx:
 ```
 ┌──────────────────────────────────────────┐
 │  WG Busy — WireGuard Server Manager      │
-├──────────────┬───────────────────────────┤
-│ [Peers]      │ [Server]                  │
-├──────────────┴───────────────────────────┤
+├──────────────┬────────────────────────┬──────────┤
+│ [Peers]      │ [Server]               │ [BGP]    │
+├──────────────┴────────────────────────┴──────────┤
 │                                          │
 │  ┌── #tab-content ─────────────────────┐ │
 │  │                                     │ │
@@ -465,9 +465,9 @@ A stats bar appears above the tab navigation showing server-level WireGuard stat
 ### Layout
 
 ```
-┌──────────────────────────────────────────────────────┐
-│  ● wg0 up 2h 15m  │  ↓ 1.2 GB  ↑ 340 MB  │ ▁▃▅▂▇▃ │
-└──────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────┐
+│  ● wg0 up 2h 15m  │  ↓ 1.2 MB/s (1.2 GB)  ↑ 340 KB/s (340 MB)  │ ▁▃▅▂▇▃ │
+└─────────────────────────────────────────────────────────────┘
 ```
 
 - **Status indicator**: green dot when wg0 is up, interface name, uptime
@@ -499,10 +499,10 @@ Each peer row displays inline stats without adding vertical space — stats appe
 ### Layout
 
 ```
-┌──────────────────────────────────────────────────────────────────┐
-│ Alice Laptop [Exit Node]                                        │
-│ 10.0.0.2/32 · ↓ 45 MB ↑ 12 MB · shake 2m ago · ▁▃▅▂  [QR][DL]│
-└──────────────────────────────────────────────────────────────────┘
+┌────────────────────────────────────────────────────────────────────────┐
+│ Alice Laptop [Exit Node]                                               │
+│ 10.0.0.2/32 · ↓ 45 KB/s (45 MB) ↑ 12 KB/s (12 MB) · shake 2m ago · ▁▃▅▂  [QR][DL]│
+└────────────────────────────────────────────────────────────────────────┘
 ```
 
 - Transfer Rx/Tx counters
@@ -535,6 +535,7 @@ GET  /server                    → server config form fragment
 PUT  /server                    → update config → return form + success toast
 
 GET  /stats                     → stats bar HTML fragment (polled every 2s)
+GET  /bgp/stats                 → BGP statistics fragment
 ```
 
 ### File/Action Endpoints
@@ -556,12 +557,12 @@ POST /api/peers/{id}/regenerate-keys    → new keypair → return updated form
 │  ┌── #stats-bar (hx-trigger every 2s) ┐ │
 │  │ ● wg0 up 2h 15m │ ↓1.2GB ↑340MB │▁▃│ │
 │  └────────────────────────────────────┘ │
-├──────────────┬───────────────────────────┤
-│ [Peers]      │ [Server]                  │
-├──────────────┴───────────────────────────┤
-│  ┌── #tab-content ─────────────────────┐ │
-│  │  (Peers list OR Server config)      │ │
-│  └─────────────────────────────────────┘ │
+├──────────────┬─────────────────────────┬─────────┤
+│ [Peers]      │ [Server]                │ [BGP]   │
+├──────────────┴─────────────────────────┴─────────┤
+│  ┌── #tab-content ─────────────────────────────┐ │
+│  │  (Peers list OR Server config OR BGP tab)   │ │
+│  └─────────────────────────────────────────────┘ │
 │  ┌── #modal-container ─────────────────┐ │
 │  │  (<dialog> for peer form / QR code) │ │
 │  └─────────────────────────────────────┘ │
@@ -575,7 +576,7 @@ POST /api/peers/{id}/regenerate-keys    → new keypair → return updated form
 - **Routing table IDs persisted** in YAML for stability across restarts
 - **Exit node AllowedIPs override** — YAML keeps /32, wg0.conf gets 0.0.0.0/0
 - **Cascade on exit node removal** — clears all ExitNodeID references
-- **CDN for htmx/pico.css**, **Go 1.22+ ServeMux**, **wgtypes for keys**, **stateless IPAM**
+- **CDN for htmx**, **Go 1.22+ ServeMux**, **wgtypes for keys**, **stateless IPAM**
 - **WireGuard auto-start** on Docker container startup via `wg-quick up wg0`
 - **Background stats polling** via `wg show wg0 dump` every 2s with ring buffer
 - **Server-side SVG sparklines** — no client-side JS charting needed
