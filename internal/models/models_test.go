@@ -83,6 +83,45 @@ func validPeer() Peer {
 	}
 }
 
+// Strict mode with nothing to match would block the peer entirely, so it must
+// be rejected rather than silently locking the peer out.
+func TestStrictPolicyRoutingValidation(t *testing.T) {
+	tests := []struct {
+		name    string
+		mutate  func(*Peer)
+		wantErr bool
+	}{
+		{"strict with a policy route", func(p *Peer) {
+			p.StrictPolicyRouting = true
+			p.PolicyRoutes = []string{"10.5.5.0/24 via 10.0.0.2"}
+		}, false},
+		{"strict with an exit node", func(p *Peer) {
+			p.StrictPolicyRouting = true
+			p.ExitNodeID = "some-exit-node"
+		}, false},
+		{"strict with neither", func(p *Peer) { p.StrictPolicyRouting = true }, true},
+		{"not strict with neither", func(p *Peer) {}, false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			p := validPeer()
+			tt.mutate(&p)
+
+			var got bool
+			for _, e := range p.Validate(GatewayNets("10.0.0.1/24", nil)) {
+				if e.Field == "strictPolicyRouting" {
+					got = true
+					t.Logf("strictPolicyRouting: %s", e.Message)
+				}
+			}
+			if got != tt.wantErr {
+				t.Errorf("strictPolicyRouting error = %v, want %v", got, tt.wantErr)
+			}
+		})
+	}
+}
+
 func TestZeroTierValidate(t *testing.T) {
 	tests := []struct {
 		name    string

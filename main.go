@@ -82,8 +82,8 @@ func main() {
 	// A network coming up changes which interface those routes belong on, so
 	// re-render wg0.conf when that happens rather than waiting for the next save.
 	zt.OnGatewaysChanged(func() {
-		if err := store.RenderWGConfig(); err != nil {
-			log.Printf("re-rendering wg0.conf after ZeroTier change: %v", err)
+		if err := store.ReapplyRouting(); err != nil {
+			log.Printf("applying routing after ZeroTier change: %v", err)
 		}
 	})
 	store.Read(func(cfg *models.AppConfig) { zt.Configure(cfg) })

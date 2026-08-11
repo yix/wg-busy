@@ -119,6 +119,7 @@ type AppConfig struct {
 | ExitNodeRoutes | []string | no | list of CIDRs for split tunnel | — |
 | AdvertisedRoutes | []string | no | list of CIDRs to route through peer | — |
 | PolicyRoutes | []string | no | list of "CIDR via IP" strings | — |
+| StrictPolicyRouting | bool | no | reject traffic not matching this peer's own routes | — |
 | RoutingTableID | uint | auto | assigned when IsExitNode=true | — |
 | PolicyRoutingTableID | uint | auto | assigned when PolicyRoutes is set | — |
 | Enabled | bool | no | default true | — (controls inclusion) |
@@ -251,6 +252,65 @@ only exist once the network is authorized, and a missing one must not abort `wg-
 
 Because these commands live in `wg0.conf`'s `PostUp`, a newly joined ZeroTier network's routes are
 applied on the next **Apply Config** (`wg syncconf` does not re-run `PostUp`).
+
+### NAT for ZeroTier egress
+
+A packet routed out a ZeroTier interface still carries its original source — a WireGuard peer IP
+that the ZeroTier network has no route back to — so replies would never return. While ZeroTier is
+enabled, `PostUp` installs:
+
+```
+iptables -t nat -C POSTROUTING -o zt+ -j MASQUERADE 2>/dev/null || iptables -t nat -A POSTROUTING -o zt+ -j MASQUERADE
+```
+
+The `zt+` wildcard covers every ZeroTier interface, including networks joined after wg0 came up, so
+the rule never needs to know device names. `PostDown` removes it with a trailing `|| true`.
+
+### Generated commands must be idempotent
+
+wg-quick runs hooks with `(eval "$hook")` under `set -e`, so **any hook that fails aborts the
+bring-up and deletes the interface**. Every generated command is therefore written to converge
+rather than fail:
+
+| Command | Hazard | Form used |
+|---|---|---|
+| `ip rule add … priority N` | `EEXIST` if the priority is taken by a stale rule | `ip rule del priority N 2>/dev/null \|\| true; ip rule add …` |
+| `ip route add … table N` | `EEXIST` if the route is already present | `ip route replace … table N` |
+| policy routes | gateway not on-link yet (ZeroTier still starting) | trailing `\|\| true` |
+| `iptables -A` | duplicate rule when a teardown never ran | `-C … \|\| -A …` |
+| all deletes | rule already gone | trailing `\|\| true` |
+
+This is not defensive styling — each one has been observed to take WireGuard down. A policy route
+whose ZeroTier gateway was not yet on-link fell back to `dev wg0`, failed with *"Nexthop has
+invalid gateway"*, and left the host with no `wg0` at all.
+
+Because the commands are idempotent, `Store.ReapplyRouting` can converge the live kernel state
+without restarting the interface. It runs when ZeroTier reports new on-link networks, so a network
+that comes up after wg0 gets its routes and NAT rule immediately instead of waiting for a manual
+**Apply Config**.
+
+### Strict Policy Routing
+
+`StrictPolicyRouting` confines a peer to its own tables. After the peer's lookups a reject rule is
+installed, so unmatched traffic stops there instead of falling through to `main`:
+
+```
+ip rule add from 10.0.0.2 table 100 priority 10000   # the peer's policy table
+ip rule add from 10.0.0.2 prohibit  priority 10001   # everything else is refused
+...
+32766: from all lookup main                          # never reached by this peer
+```
+
+Rule priorities are **explicit** (`rulePriorityBase = 10000`). This is load-bearing: `ip rule add`
+without a priority assigns a *descending* number, so the last rule added would be evaluated first —
+putting the reject ahead of the table lookup and blackholing the peer completely. Both `PostUp` and
+`PostDown` render from the same `peerRules` specs, so teardown deletes by exact priority and
+repeated applies cannot accumulate duplicate rules.
+
+A strict peer that also uses an exit node keeps both lookups (exit node, then policy table) before
+the reject. `prohibit` is used rather than `blackhole` so the client fails fast with an
+administratively-prohibited error instead of hanging. Validation requires at least one policy route
+or an exit node, since strict mode with nothing to match would block the peer entirely.
 
 ## Config Persistence: YAML → .conf
 

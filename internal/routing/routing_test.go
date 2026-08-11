@@ -1,6 +1,8 @@
 package routing
 
 import (
+	"fmt"
+	"slices"
 	"strings"
 	"testing"
 
@@ -31,10 +33,10 @@ func TestPolicyRouteDeviceSelection(t *testing.T) {
 
 	up := strings.Join(GeneratePostUpCommands(cfg, gateways), "\n")
 
-	if !strings.Contains(up, "ip route add 10.5.5.0/24 via 10.0.0.2 dev wg0 table 100") {
+	if !strings.Contains(up, "ip route replace 10.5.5.0/24 via 10.0.0.2 dev wg0 table 100") {
 		t.Errorf("WireGuard gateway not routed over wg0:\n%s", up)
 	}
-	if !strings.Contains(up, "ip route add 10.9.9.0/24 via 10.147.17.99 dev zt5u4va25t table 100 || true") {
+	if !strings.Contains(up, "ip route replace 10.9.9.0/24 via 10.147.17.99 dev zt5u4va25t table 100 || true") {
 		t.Errorf("ZeroTier gateway not routed over its zt device:\n%s", up)
 	}
 
@@ -46,8 +48,179 @@ func TestPolicyRouteDeviceSelection(t *testing.T) {
 	// Without ZeroTier the same route falls back to wg0 rather than emitting an
 	// empty device, which would be a syntax error at apply time.
 	noZT := strings.Join(GeneratePostUpCommands(cfg, models.GatewayNets(cfg.Server.Address, nil)), "\n")
-	if !strings.Contains(noZT, "ip route add 10.9.9.0/24 via 10.147.17.99 dev wg0 table 100") {
+	if !strings.Contains(noZT, "ip route replace 10.9.9.0/24 via 10.147.17.99 dev wg0 table 100") {
 		t.Errorf("unknown gateway did not fall back to wg0:\n%s", noZT)
+	}
+}
+
+// Strict mode must reject unmatched traffic *after* the peer's own tables are
+// consulted. Priorities are explicit because `ip rule add` without one counts
+// down, which would put the reject first and blackhole the peer entirely.
+func TestStrictPolicyRoutingOrder(t *testing.T) {
+	cfg := models.AppConfig{
+		Server: models.ServerConfig{Address: "10.0.0.1/24"},
+		Peers: []models.Peer{{
+			ID: "p1", Name: "locked", Enabled: true, AllowedIPs: "10.0.0.5/32",
+			PolicyRoutingTableID: 100,
+			PolicyRoutes:         []string{"10.5.5.0/24 via 10.0.0.2"},
+			StrictPolicyRouting:  true,
+		}},
+	}
+	gateways := models.GatewayNets(cfg.Server.Address, nil)
+
+	var lookupPrio, rejectPrio int
+	for _, cmd := range GeneratePostUpCommands(cfg, gateways) {
+		var prio int
+		switch {
+		case strings.Contains(cmd, "from 10.0.0.5 table 100 priority"):
+			fmt.Sscanf(cmd[strings.LastIndex(cmd, "priority "):], "priority %d", &prio)
+			lookupPrio = prio
+		case strings.Contains(cmd, "from 10.0.0.5 prohibit priority"):
+			fmt.Sscanf(cmd[strings.LastIndex(cmd, "priority "):], "priority %d", &prio)
+			rejectPrio = prio
+		}
+	}
+
+	if lookupPrio == 0 {
+		t.Fatal("no table lookup rule emitted for the strict peer")
+	}
+	if rejectPrio == 0 {
+		t.Fatal("no reject rule emitted for the strict peer")
+	}
+	if lookupPrio >= rejectPrio {
+		t.Errorf("reject (priority %d) is evaluated before the table lookup (priority %d): all traffic would be dropped", rejectPrio, lookupPrio)
+	}
+	// Both must be consulted before the kernel's main table at 32766.
+	if rejectPrio >= 32766 {
+		t.Errorf("reject priority %d is not before main (32766); traffic would leak", rejectPrio)
+	}
+
+	// PostDown must remove exactly what PostUp added, priorities included.
+	up := GeneratePostUpCommands(cfg, gateways)
+	down := GeneratePostDownCommands(cfg, gateways)
+	for _, cmd := range up {
+		i := strings.Index(cmd, "ip rule add ")
+		if i < 0 {
+			continue
+		}
+		want := strings.Replace(cmd[i:], "ip rule add ", "ip rule del ", 1) + " || true"
+		if !slices.Contains(down, want) {
+			t.Errorf("PostUp %q has no matching PostDown %q", cmd, want)
+		}
+	}
+}
+
+// A rule priority that is already taken makes `ip rule add` fail with EEXIST,
+// and wg-quick runs hooks under set -e — so a leftover rule from a teardown that
+// never ran would abort the whole interface bring-up. Every add must therefore
+// clear its slot first.
+func TestRuleAddIsIdempotent(t *testing.T) {
+	cfg := models.AppConfig{
+		Server: models.ServerConfig{Address: "10.0.0.1/24"},
+		Peers: []models.Peer{{
+			ID: "p1", Enabled: true, AllowedIPs: "10.0.0.5/32",
+			PolicyRoutingTableID: 100,
+			PolicyRoutes:         []string{"10.5.5.0/24 via 10.0.0.2"},
+		}},
+	}
+
+	for _, cmd := range GeneratePostUpCommands(cfg, models.GatewayNets(cfg.Server.Address, nil)) {
+		if strings.Contains(cmd, "ip rule add ") && !strings.Contains(cmd, "ip rule del priority ") {
+			t.Errorf("rule add does not free its priority first, so a stale rule aborts wg-quick up: %s", cmd)
+		}
+		// Routes into a table have the same hazard; replace is idempotent, add is not.
+		if strings.Contains(cmd, "ip route add ") {
+			t.Errorf("use `ip route replace` so an existing route does not abort bring-up: %s", cmd)
+		}
+	}
+}
+
+// Without strict mode no reject rule is emitted, so unmatched traffic keeps
+// falling back to the main table as before.
+func TestNonStrictHasNoRejectRule(t *testing.T) {
+	cfg := models.AppConfig{
+		Server: models.ServerConfig{Address: "10.0.0.1/24"},
+		Peers: []models.Peer{{
+			ID: "p1", Enabled: true, AllowedIPs: "10.0.0.5/32",
+			PolicyRoutingTableID: 100,
+			PolicyRoutes:         []string{"10.5.5.0/24 via 10.0.0.2"},
+		}},
+	}
+	for _, cmd := range GeneratePostUpCommands(cfg, models.GatewayNets(cfg.Server.Address, nil)) {
+		if strings.Contains(cmd, "prohibit") {
+			t.Errorf("unexpected reject rule for a non-strict peer: %s", cmd)
+		}
+	}
+}
+
+// A strict peer that also uses an exit node must consult both of its tables
+// before the reject.
+func TestStrictWithExitNode(t *testing.T) {
+	cfg := models.AppConfig{
+		Server: models.ServerConfig{Address: "10.0.0.1/24"},
+		Peers: []models.Peer{
+			{
+				ID: "p1", Enabled: true, AllowedIPs: "10.0.0.5/32", ExitNodeID: "p2",
+				PolicyRoutingTableID: 100,
+				PolicyRoutes:         []string{"10.5.5.0/24 via 10.0.0.2"},
+				StrictPolicyRouting:  true,
+			},
+			{ID: "p2", Enabled: true, AllowedIPs: "10.0.0.6/32", IsExitNode: true, ExitNodeAllowAll: true, RoutingTableID: 101},
+		},
+	}
+
+	var order []string
+	for _, cmd := range GeneratePostUpCommands(cfg, models.GatewayNets(cfg.Server.Address, nil)) {
+		if strings.Contains(cmd, "ip rule add from 10.0.0.5") {
+			order = append(order, cmd)
+		}
+	}
+	if len(order) != 3 {
+		t.Fatalf("expected exit-node lookup, policy lookup and reject; got %d:\n%s", len(order), strings.Join(order, "\n"))
+	}
+	if !strings.Contains(order[2], "prohibit") {
+		t.Errorf("reject is not last:\n%s", strings.Join(order, "\n"))
+	}
+}
+
+// Traffic leaving over ZeroTier carries a source the ZeroTier network cannot
+// route back to, so it has to be masqueraded.
+func TestZeroTierMasquerade(t *testing.T) {
+	cfg := models.AppConfig{
+		Server:   models.ServerConfig{Address: "10.0.0.1/24"},
+		ZeroTier: models.ZeroTierConfig{Enabled: true},
+		Peers: []models.Peer{{
+			ID: "p1", Enabled: true, AllowedIPs: "10.0.0.5/32",
+			PolicyRoutingTableID: 100,
+			PolicyRoutes:         []string{"10.9.9.0/24 via 10.147.17.99"},
+		}},
+	}
+	gateways := models.GatewayNets(cfg.Server.Address, nil)
+
+	up := strings.Join(GeneratePostUpCommands(cfg, gateways), "\n")
+	if !strings.Contains(up, "iptables -t nat -A POSTROUTING -o zt+ -j MASQUERADE") {
+		t.Errorf("no masquerade rule for ZeroTier egress:\n%s", up)
+	}
+	// Applying twice must not stack duplicates.
+	if !strings.Contains(up, "iptables -t nat -C POSTROUTING -o zt+ -j MASQUERADE") {
+		t.Errorf("masquerade rule is added unconditionally, so repeated applies would duplicate it:\n%s", up)
+	}
+
+	down := strings.Join(GeneratePostDownCommands(cfg, gateways), "\n")
+	if !strings.Contains(down, "iptables -t nat -D POSTROUTING -o zt+ -j MASQUERADE") {
+		t.Errorf("masquerade rule is never removed:\n%s", down)
+	}
+	// An already-removed rule must not abort the teardown under wg-quick's set -e.
+	if !strings.Contains(down, "MASQUERADE || true") {
+		t.Errorf("masquerade teardown is not guarded:\n%s", down)
+	}
+
+	// With ZeroTier off there is nothing to NAT.
+	cfg.ZeroTier.Enabled = false
+	off := strings.Join(GeneratePostUpCommands(cfg, gateways), "\n") +
+		strings.Join(GeneratePostDownCommands(cfg, gateways), "\n")
+	if strings.Contains(off, "MASQUERADE") {
+		t.Errorf("masquerade rule emitted while ZeroTier is disabled:\n%s", off)
 	}
 }
 
@@ -72,7 +245,7 @@ func TestPolicyRoutesWithoutExitNode(t *testing.T) {
 	if !strings.Contains(joined, "ip rule add from 10.0.0.5 table 100") {
 		t.Errorf("policy rule missing:\n%s", joined)
 	}
-	if !strings.Contains(joined, "ip route add 10.5.5.0/24 via 10.0.0.2 dev wg0 table 100") {
+	if !strings.Contains(joined, "ip route replace 10.5.5.0/24 via 10.0.0.2 dev wg0 table 100") {
 		t.Errorf("policy route missing:\n%s", joined)
 	}
 

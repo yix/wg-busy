@@ -146,6 +146,19 @@ func (s *Store) RenderWGConfig() error {
 	return s.renderWGConfig()
 }
 
+// ReapplyRouting re-renders wg0.conf and converges the live routing state to it.
+// Called when a ZeroTier network comes up after wg0, whose routes and NAT rule
+// would otherwise sit uninstalled until the next manual apply.
+func (s *Store) ReapplyRouting() error {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	if err := s.renderWGConfig(); err != nil {
+		return err
+	}
+	return routing.Apply(routing.GeneratePostUpCommands(s.config, s.gatewayNets()))
+}
+
 func (s *Store) saveYAML() error {
 	data, err := yaml.Marshal(&s.config)
 	if err != nil {

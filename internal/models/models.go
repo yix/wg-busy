@@ -100,6 +100,7 @@ type Peer struct {
 	ExitNodeRoutes       []string `yaml:"exitNodeRoutes,omitempty"`
 	AdvertisedRoutes     []string `yaml:"advertisedRoutes,omitempty"`
 	PolicyRoutes         []string `yaml:"policyRoutes,omitempty"`
+	StrictPolicyRouting  bool     `yaml:"strictPolicyRouting,omitempty"`
 	RoutingTableID       uint     `yaml:"routingTableID,omitempty"`
 	PolicyRoutingTableID uint     `yaml:"policyRoutingTableID,omitempty"`
 	Enabled              bool     `yaml:"enabled"`
@@ -412,6 +413,16 @@ func (p *Peer) Validate(gateways []GatewayNet) ValidationErrors {
 				})
 			}
 		}
+	}
+
+	// Strict mode installs a reject rule after the peer's own table lookups.
+	// Without a table to consult first it would drop everything, so require one
+	// rather than letting the peer silently lose all connectivity.
+	if p.StrictPolicyRouting && len(p.PolicyRoutes) == 0 && p.ExitNodeID == "" {
+		errs = append(errs, ValidationError{
+			Field:   "strictPolicyRouting",
+			Message: "requires at least one policy route (or an exit node); otherwise all traffic from this peer would be blocked",
+		})
 	}
 
 	if p.BGPEnabled {

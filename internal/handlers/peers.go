@@ -226,6 +226,7 @@ func (h *handler) CreatePeer(w http.ResponseWriter, r *http.Request) {
 		ExitNodeRoutes:      exitNodeRoutes,
 		AdvertisedRoutes:    advertisedRoutes,
 		PolicyRoutes:        policyRoutes,
+		StrictPolicyRouting: r.FormValue("strictPolicyRouting") == "on",
 		BGPEnabled:          bgpEnabled,
 		BGPConnect:          bgpConnect,
 		BGPPeerIP:           bgpPeerIP,
@@ -385,6 +386,7 @@ func (h *handler) UpdatePeer(w http.ResponseWriter, r *http.Request) {
 		p.ExitNodeRoutes = exitNodeRoutes
 		p.AdvertisedRoutes = advertisedRoutes
 		p.PolicyRoutes = policyRoutes
+		p.StrictPolicyRouting = r.FormValue("strictPolicyRouting") == "on"
 		p.BGPEnabled = bgpEnabled
 		p.BGPConnect = bgpConnect
 		p.BGPPeerIP = bgpPeerIP

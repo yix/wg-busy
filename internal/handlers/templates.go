@@ -62,6 +62,7 @@ var templates = template.Must(template.New("").Funcs(template.FuncMap{
             {{.Peer.Name}}
             {{if .Peer.IsExitNode}}<span class="badge badge-exit">Exit Node</span>{{end}}
             {{if .ExitNodeName}}<span class="badge badge-via">via {{.ExitNodeName}}</span>{{end}}
+            {{if .Peer.StrictPolicyRouting}}<span class="badge badge-warn" title="Traffic may only use this peer's own routes">Strict</span>{{end}}
         </strong>
         {{if .Endpoint}}<div style="font-size:0.8em;font-weight:normal;opacity:0.7;margin-top:0.1em">({{.Endpoint}})</div>{{end}}
         <small id="peer-stats-{{.Peer.ID}}">
@@ -176,6 +177,19 @@ var templates = template.Must(template.New("").Funcs(template.FuncMap{
                 </small>
                 {{range .ValidationErrors}}{{if eq .Field "policyRoutes"}}<small class="field-error">{{.Message}}</small>{{end}}{{end}}
             </label>
+
+            <fieldset>
+                <label>
+                    <input type="checkbox" name="strictPolicyRouting" {{if .Peer.StrictPolicyRouting}}checked{{end}}>
+                    Strict policy routing
+                </label>
+                <small>
+                    Traffic from this peer may only use the routes above. Anything they do not
+                    match is rejected instead of falling back to the server's main routing table,
+                    so nothing can leak out of the intended path.
+                </small>
+                {{range .ValidationErrors}}{{if eq .Field "strictPolicyRouting"}}<small class="field-error">{{.Message}}</small>{{end}}{{end}}
+            </fieldset>
 
             <label>
                 DNS (override)
