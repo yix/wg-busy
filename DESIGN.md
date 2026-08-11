@@ -237,8 +237,20 @@ Peers can declare "Advertised Routes", which are subnets that reside behind the 
 If you need granular control where traffic from a specific peer destined to specific subnets must be routed via a distinct gateway IP, you can configure "Policy Routes" (formatted as `<CIDR> via <Gateway IP>`).
 When defined, WG-Busy assigns a dedicated `PolicyRoutingTableID` to the peer and injects:
 - `ip rule add from <peer_ip> table <table_id>`
-- `ip route add <CIDR> via <Gateway IP> dev wg0 table <table_id>`
-These commands are added to `PostUp` and mirrored in `PostDown` for clean teardown.
+- `ip route add <CIDR> via <Gateway IP> dev <iface> table <table_id>`
+These commands are added to `PostUp` and mirrored in `PostDown` for clean teardown. They do not
+depend on exit nodes — a peer with only policy routes still gets both.
+
+**The gateway picks the interface.** `models.GatewayNets` collects every on-link network: the
+WireGuard `Address` (as `wg0`) plus each joined ZeroTier network's assigned addresses (as its
+`zt*` device). `models.DeviceForGateway` then resolves `<iface>` by finding which of those subnets
+contains the gateway IP, so a ZeroTier peer IP is a valid gateway and its route is pinned to the
+ZeroTier interface. The same list drives validation, so an unreachable gateway is rejected with the
+usable subnets listed. Routes over a `zt*` device are suffixed with `|| true`: those interfaces
+only exist once the network is authorized, and a missing one must not abort `wg-quick up`.
+
+Because these commands live in `wg0.conf`'s `PostUp`, a newly joined ZeroTier network's routes are
+applied on the next **Apply Config** (`wg syncconf` does not re-run `PostUp`).
 
 ## Config Persistence: YAML → .conf
 

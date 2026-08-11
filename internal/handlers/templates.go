@@ -170,6 +170,10 @@ var templates = template.Must(template.New("").Funcs(template.FuncMap{
                           placeholder="10.5.5.0/24 via 10.0.0.1">{{range .Peer.PolicyRoutes}}{{.}}
 {{end}}</textarea>
                 <small>Format: &lt;CIDR&gt; via &lt;Gateway IP&gt;, one per line. Traffic to these subnets from this peer will be routed via the gateway.</small>
+                <small>
+                    The gateway can be a WireGuard peer or a ZeroTier peer &mdash; the route follows whichever interface it is on-link for. Available:
+                    {{range $i, $g := .Gateways}}{{if $i}}, {{end}}<code>{{$g.CIDR}}</code> ({{$g.Device}}){{else}}none configured{{end}}
+                </small>
                 {{range .ValidationErrors}}{{if eq .Field "policyRoutes"}}<small class="field-error">{{.Message}}</small>{{end}}{{end}}
             </label>
 
@@ -523,6 +527,14 @@ var templates = template.Must(template.New("").Funcs(template.FuncMap{
             {{if .Snapshot.Status}}<code>{{.Snapshot.Status.Address}}</code>{{else}}&mdash;{{end}}
         </article>
         <article>
+            <header><strong>My ZeroTier IP</strong></header>
+            {{if .Addresses}}
+                {{range .Addresses}}<div><code>{{.}}</code></div>{{end}}
+            {{else}}
+                <span class="text-muted">Not assigned yet</span>
+            {{end}}
+        </article>
+        <article>
             <header><strong>Online</strong></header>
             {{if .Snapshot.Status}}
                 {{if .Snapshot.Status.Online}}
@@ -573,18 +585,23 @@ var templates = template.Must(template.New("").Funcs(template.FuncMap{
             {{end}}
         </p>
 
+        {{$dev := .PortDeviceName}}
+        <strong><small>Routes received from this network ({{len .Routes}})</small></strong>
         {{if .Routes}}
-        <details>
-            <summary>Managed Routes ({{len .Routes}})</summary>
-            <table role="grid">
-                <thead><tr><th scope="col">Target</th><th scope="col">Via</th><th scope="col">Metric</th></tr></thead>
-                <tbody>
-                {{range .Routes}}
-                <tr><td>{{.Target}}</td><td>{{if .Via}}{{.Via}}{{else}}(local){{end}}</td><td>{{.Metric}}</td></tr>
-                {{end}}
-                </tbody>
-            </table>
-        </details>
+        <table role="grid">
+            <thead><tr><th scope="col">Target</th><th scope="col">Via</th><th scope="col">Metric</th></tr></thead>
+            <tbody>
+            {{range .Routes}}
+            <tr>
+                <td><code>{{.Target}}</code></td>
+                <td>{{if .Via}}<code>{{.Via}}</code>{{else}}<span class="text-muted">on-link ({{$dev}})</span>{{end}}</td>
+                <td>{{.Metric}}</td>
+            </tr>
+            {{end}}
+            </tbody>
+        </table>
+        {{else}}
+        <p><small class="text-muted">No routes pushed by this network.</small></p>
         {{end}}
     </article>
     {{end}}

@@ -2,23 +2,29 @@ package models
 
 import "testing"
 
-// A policy route becomes "ip route add <cidr> via <gw> dev wg0", so the gateway
-// must be inside the WireGuard subnet or the kernel rejects it at apply time.
+// A policy route becomes "ip route add <cidr> via <gw> dev <iface>", so the
+// gateway must be on-link for an interface we manage — the WireGuard subnet or
+// a joined ZeroTier network — or the kernel rejects it at apply time.
 func TestValidatePolicyRouteGateway(t *testing.T) {
+	ztNets := []GatewayNet{{Device: "zt5u4va25t", CIDR: "10.147.17.36/24"}}
+
 	tests := []struct {
 		name       string
 		route      string
 		serverAddr string
+		zt         []GatewayNet
 		wantErr    bool
 	}{
-		{"gateway in subnet", "10.5.5.0/24 via 10.0.0.2", "10.0.0.1/24", false},
-		{"gateway outside subnet", "10.5.5.0/24 via 8.8.8.8", "10.0.0.1/24", true},
-		{"gateway in second subnet of list", "10.5.5.0/24 via 192.168.9.7", "10.0.0.1/24, 192.168.9.1/24", false},
-		{"server address unknown skips check", "10.5.5.0/24 via 8.8.8.8", "", false},
-		{"server address unparseable skips check", "10.5.5.0/24 via 8.8.8.8", "not-a-cidr", false},
-		{"malformed route", "10.5.5.0/24 8.8.8.8", "10.0.0.1/24", true},
-		{"bad gateway ip", "10.5.5.0/24 via nope", "10.0.0.1/24", true},
-		{"bad cidr", "10.5.5.0 via 10.0.0.2", "10.0.0.1/24", true},
+		{"gateway in wg subnet", "10.5.5.0/24 via 10.0.0.2", "10.0.0.1/24", nil, false},
+		{"gateway outside every subnet", "10.5.5.0/24 via 8.8.8.8", "10.0.0.1/24", nil, true},
+		{"gateway in second wg subnet", "10.5.5.0/24 via 192.168.9.7", "10.0.0.1/24, 192.168.9.1/24", nil, false},
+		{"gateway in zerotier subnet", "10.5.5.0/24 via 10.147.17.99", "10.0.0.1/24", ztNets, false},
+		{"zerotier gateway without zerotier", "10.5.5.0/24 via 10.147.17.99", "10.0.0.1/24", nil, true},
+		{"no gateways known skips check", "10.5.5.0/24 via 8.8.8.8", "", nil, false},
+		{"server address unparseable skips check", "10.5.5.0/24 via 8.8.8.8", "not-a-cidr", nil, false},
+		{"malformed route", "10.5.5.0/24 8.8.8.8", "10.0.0.1/24", nil, true},
+		{"bad gateway ip", "10.5.5.0/24 via nope", "10.0.0.1/24", nil, true},
+		{"bad cidr", "10.5.5.0 via 10.0.0.2", "10.0.0.1/24", nil, true},
 	}
 
 	for _, tt := range tests {
@@ -27,7 +33,7 @@ func TestValidatePolicyRouteGateway(t *testing.T) {
 			p.PolicyRoutes = []string{tt.route}
 
 			var got bool
-			for _, e := range p.Validate(tt.serverAddr) {
+			for _, e := range p.Validate(GatewayNets(tt.serverAddr, tt.zt)) {
 				if e.Field == "policyRoutes" {
 					got = true
 					t.Logf("policyRoutes: %s", e.Message)
@@ -37,6 +43,31 @@ func TestValidatePolicyRouteGateway(t *testing.T) {
 				t.Errorf("policyRoutes error = %v, want %v", got, tt.wantErr)
 			}
 		})
+	}
+}
+
+// The gateway decides which interface the route is pinned to.
+func TestDeviceForGateway(t *testing.T) {
+	nets := GatewayNets("10.0.0.1/24", []GatewayNet{
+		{Device: "zt5u4va25t", CIDR: "10.147.17.36/24"},
+		{Device: "ztabcdef12", CIDR: "192.168.191.5/16"},
+	})
+
+	tests := []struct {
+		gateway string
+		want    string
+	}{
+		{"10.0.0.9", WGDevice},
+		{"10.147.17.99", "zt5u4va25t"},
+		{"192.168.4.4", "ztabcdef12"},
+		{"8.8.8.8", ""},
+		{"not-an-ip", ""},
+	}
+
+	for _, tt := range tests {
+		if got := DeviceForGateway(tt.gateway, nets); got != tt.want {
+			t.Errorf("DeviceForGateway(%q) = %q, want %q", tt.gateway, got, tt.want)
+		}
 	}
 }
 
@@ -95,7 +126,7 @@ func TestZeroTierPortDefault(t *testing.T) {
 
 func TestValidPeerHasNoErrors(t *testing.T) {
 	p := validPeer()
-	if errs := p.Validate("10.0.0.1/24"); len(errs) > 0 {
+	if errs := p.Validate(GatewayNets("10.0.0.1/24", nil)); len(errs) > 0 {
 		t.Fatalf("expected no errors, got: %v", errs)
 	}
 }

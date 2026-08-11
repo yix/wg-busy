@@ -143,6 +143,53 @@ type BGPStats struct {
 	Peers    []BGPPeerStats `json:"peers"`
 }
 
+// WGDevice is the WireGuard interface wg-busy manages.
+const WGDevice = "wg0"
+
+// GatewayNet is an on-link network a policy route gateway can live in, together
+// with the interface it is reachable through (wg0, or a ZeroTier zt* device).
+type GatewayNet struct {
+	Device string
+	CIDR   string
+}
+
+// GatewayNets returns every network a policy route gateway may point into: the
+// WireGuard subnet, plus the ZeroTier subnets the node has joined. Entries that
+// are not valid CIDRs are dropped — they can never match a gateway, and keeping
+// them would turn an unconfigured server address into "no gateway is valid".
+func GatewayNets(serverAddr string, ztNets []GatewayNet) []GatewayNet {
+	var nets []GatewayNet
+	add := func(device, cidr string) {
+		if cidr = strings.TrimSpace(cidr); cidr != "" {
+			if _, _, err := net.ParseCIDR(cidr); err == nil {
+				nets = append(nets, GatewayNet{Device: device, CIDR: cidr})
+			}
+		}
+	}
+	for _, part := range strings.Split(serverAddr, ",") {
+		add(WGDevice, part)
+	}
+	for _, n := range ztNets {
+		add(n.Device, n.CIDR)
+	}
+	return nets
+}
+
+// DeviceForGateway returns the interface the gateway IP is directly reachable
+// on, or "" if it is not on-link for any known network.
+func DeviceForGateway(gateway string, nets []GatewayNet) string {
+	ip := net.ParseIP(strings.TrimSpace(gateway))
+	if ip == nil {
+		return ""
+	}
+	for _, n := range nets {
+		if _, cidr, err := net.ParseCIDR(strings.TrimSpace(n.CIDR)); err == nil && cidr.Contains(ip) {
+			return n.Device
+		}
+	}
+	return ""
+}
+
 // ValidationError represents a single field validation error.
 type ValidationError struct {
 	Field   string
@@ -275,9 +322,9 @@ func (z *ZeroTierConfig) Validate() ValidationErrors {
 var nameRegexp = regexp.MustCompile(`^[a-zA-Z0-9 _.\-]+$`)
 
 // Validate checks all fields on Peer and returns all errors found.
-// serverAddr is the server's Address (CIDR list) and is used to check that
-// policy route gateways are directly reachable over wg0. Pass "" to skip that check.
-func (p *Peer) Validate(serverAddr string) ValidationErrors {
+// gateways are the on-link networks a policy route gateway may point into —
+// build them with GatewayNets. Pass nil to skip the gateway reachability check.
+func (p *Peer) Validate(gateways []GatewayNet) ValidationErrors {
 	var errs ValidationErrors
 
 	if strings.TrimSpace(p.Name) == "" {
@@ -343,9 +390,9 @@ func (p *Peer) Validate(serverAddr string) ValidationErrors {
 	}
 
 	if len(p.PolicyRoutes) > 0 {
-		// Policy routes are installed as "ip route add <cidr> via <gw> dev wg0", so the
-		// gateway must sit inside the WireGuard subnet or the kernel rejects the route.
-		serverNets := parseCIDRList(serverAddr)
+		// Policy routes are installed as "ip route add <cidr> via <gw> dev <iface>",
+		// so the gateway must be on-link for one of the interfaces we manage —
+		// the WireGuard subnet, or a ZeroTier network the node has joined.
 		for _, pr := range p.PolicyRoutes {
 			parts := strings.Split(pr, " via ")
 			if len(parts) != 2 {
@@ -358,10 +405,10 @@ func (p *Peer) Validate(serverAddr string) ValidationErrors {
 			gw := net.ParseIP(strings.TrimSpace(parts[1]))
 			if gw == nil {
 				errs = append(errs, ValidationError{Field: "policyRoutes", Message: fmt.Sprintf("invalid Gateway IP: %s", parts[1])})
-			} else if len(serverNets) > 0 && !ipInAny(gw, serverNets) {
+			} else if len(gateways) > 0 && DeviceForGateway(gw.String(), gateways) == "" {
 				errs = append(errs, ValidationError{
 					Field:   "policyRoutes",
-					Message: fmt.Sprintf("gateway %s is not reachable on wg0: it must be inside the WireGuard subnet (%s)", gw, serverAddr),
+					Message: fmt.Sprintf("gateway %s is not directly reachable: it must be inside %s", gw, describeGateways(gateways)),
 				})
 			}
 		}
@@ -482,24 +529,21 @@ func isValidCIDRList(s string) bool {
 	return true
 }
 
-// parseCIDRList parses a comma-separated CIDR list, skipping unparseable entries.
-func parseCIDRList(s string) []*net.IPNet {
-	var nets []*net.IPNet
-	for _, part := range strings.Split(s, ",") {
-		if _, n, err := net.ParseCIDR(strings.TrimSpace(part)); err == nil {
-			nets = append(nets, n)
-		}
-	}
-	return nets
-}
-
-func ipInAny(ip net.IP, nets []*net.IPNet) bool {
+// describeGateways renders the usable gateway networks for an error message,
+// e.g. "10.0.0.1/24 (wg0) or 10.147.17.36/24 (zt5u4va25t)".
+func describeGateways(nets []GatewayNet) string {
+	parts := make([]string, 0, len(nets))
 	for _, n := range nets {
-		if n.Contains(ip) {
-			return true
-		}
+		parts = append(parts, fmt.Sprintf("%s (%s)", n.CIDR, n.Device))
 	}
-	return false
+	switch len(parts) {
+	case 0:
+		return "a directly connected subnet"
+	case 1:
+		return parts[0]
+	default:
+		return strings.Join(parts[:len(parts)-1], ", ") + " or " + parts[len(parts)-1]
+	}
 }
 
 var hostnameRegexp = regexp.MustCompile(`^[a-zA-Z0-9]([a-zA-Z0-9\-]*[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9\-]*[a-zA-Z0-9])?)*$`)

@@ -62,8 +62,9 @@ func (h *handler) DownloadServerConfig(w http.ResponseWriter, r *http.Request) {
 	var genErr error
 
 	h.store.Read(func(cfg *models.AppConfig) {
-		postUpCmds := routing.GeneratePostUpCommands(*cfg)
-		postDownCmds := routing.GeneratePostDownCommands(*cfg)
+		gateways := models.GatewayNets(cfg.Server.Address, h.ztGatewayNets())
+		postUpCmds := routing.GeneratePostUpCommands(*cfg, gateways)
+		postDownCmds := routing.GeneratePostDownCommands(*cfg, gateways)
 		content, genErr = wireguard.RenderServerConfig(*cfg, postUpCmds, postDownCmds)
 	})
 

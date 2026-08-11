@@ -76,6 +76,16 @@ func main() {
 	// desired state; the supervisor's goroutine does the starting and joining.
 	zt := zerotier.New(*ztDataPath)
 	store.OnChange(zt.Configure)
+	// Policy routes may use a ZeroTier peer IP as their gateway, so wg0.conf
+	// rendering needs to know which subnets are on-link over which zt device.
+	store.SetZeroTierGateways(zt.GatewayNets)
+	// A network coming up changes which interface those routes belong on, so
+	// re-render wg0.conf when that happens rather than waiting for the next save.
+	zt.OnGatewaysChanged(func() {
+		if err := store.RenderWGConfig(); err != nil {
+			log.Printf("re-rendering wg0.conf after ZeroTier change: %v", err)
+		}
+	})
 	store.Read(func(cfg *models.AppConfig) { zt.Configure(cfg) })
 	zt.Start()
 

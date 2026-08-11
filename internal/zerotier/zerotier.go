@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -60,6 +61,13 @@ type counter struct {
 type Supervisor struct {
 	homeDir string
 
+	// onGatewaysChanged fires when the set of ZeroTier on-link networks changes,
+	// so wg0.conf can be re-rendered: policy routes pointing at a ZeroTier
+	// gateway need its interface name, which only exists once a network is up.
+	// Called without the supervisor lock held.
+	onGatewaysChanged func()
+	gatewaySig        string
+
 	mu       sync.Mutex
 	desired  models.ZeroTierConfig
 	gen      uint64 // bumped by Configure
@@ -86,6 +94,37 @@ func New(homeDir string) *Supervisor {
 		homeDir: homeDir,
 		prev:    make(map[string]counter),
 		stop:    make(chan struct{}),
+	}
+}
+
+// OnGatewaysChanged registers a callback fired when the ZeroTier on-link
+// networks change, so dependent configuration can be re-rendered.
+func (s *Supervisor) OnGatewaysChanged(fn func()) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.onGatewaysChanged = fn
+}
+
+// notifyGatewayChange calls the callback when the gateway set changed. It must
+// be called without the lock held: the callback re-enters the config store,
+// which takes its own lock before calling back into this supervisor.
+func (s *Supervisor) notifyGatewayChange(nets []models.GatewayNet) {
+	sig := make([]string, 0, len(nets))
+	for _, n := range nets {
+		sig = append(sig, n.Device+"="+n.CIDR)
+	}
+	sort.Strings(sig)
+	joined := strings.Join(sig, ",")
+
+	s.mu.Lock()
+	changed := joined != s.gatewaySig
+	s.gatewaySig = joined
+	fn := s.onGatewaysChanged
+	s.mu.Unlock()
+
+	if changed && fn != nil {
+		log.Printf("[ZT] on-link networks changed (%s), re-rendering wg0.conf", joined)
+		fn()
 	}
 }
 
@@ -229,6 +268,7 @@ func (s *Supervisor) tick() {
 	snap.Peers = peers
 
 	s.setSnapshot(snap)
+	s.notifyGatewayChange(gatewayNets(snap.Networks))
 }
 
 // ensureRunning starts the service if needed, or restarts it if the port changed.
@@ -380,6 +420,25 @@ func (s *Supervisor) withCounters(networks []Network, desired models.ZeroTierCon
 		}
 	}
 	return out
+}
+
+// GatewayNets returns the on-link networks reachable over ZeroTier interfaces,
+// so policy routes can use a ZeroTier peer's IP as their gateway.
+func (s *Supervisor) GatewayNets() []models.GatewayNet {
+	return gatewayNets(s.Snapshot().Networks)
+}
+
+func gatewayNets(networks []NetworkStats) []models.GatewayNet {
+	var nets []models.GatewayNet
+	for _, n := range networks {
+		if n.PortDeviceName == "" {
+			continue
+		}
+		for _, addr := range n.AssignedAddresses {
+			nets = append(nets, models.GatewayNet{Device: n.PortDeviceName, CIDR: addr})
+		}
+	}
+	return nets
 }
 
 // InterfaceCounters reads an interface's byte counters from sysfs. ZeroTier's API

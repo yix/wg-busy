@@ -30,11 +30,13 @@ type ztPeerRow struct {
 
 // zerotierData is the template data for the ZeroTier tab.
 type zerotierData struct {
-	Config           models.ZeroTierConfig
-	Port             uint16
-	Snapshot         zerotier.Snapshot
-	Networks         []ztNetworkRow
-	Peers            []ztPeerRow
+	Config   models.ZeroTierConfig
+	Port     uint16
+	Snapshot zerotier.Snapshot
+	Networks []ztNetworkRow
+	Peers    []ztPeerRow
+	// Addresses are this node's own ZeroTier IPs across all joined networks.
+	Addresses        []string
 	Uptime           string
 	Success          string
 	Error            string
@@ -69,6 +71,7 @@ func (h *handler) buildZeroTierData() zerotierData {
 			row.TxPS = wgstats.FormatBytesPerSec(n.TxPS)
 		}
 		data.Networks = append(data.Networks, row)
+		data.Addresses = append(data.Addresses, n.AssignedAddresses...)
 	}
 
 	for _, p := range snap.Peers {

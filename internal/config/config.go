@@ -26,6 +26,28 @@ type Store struct {
 	// while the write lock is held, so anything slow (process control, HTTP)
 	// belongs on the receiver's own goroutine.
 	onChange func(*models.AppConfig)
+
+	// ztGateways reports the ZeroTier subnets policy routes may use as gateways.
+	// Called while the store lock is held, so it must only read cached state.
+	ztGateways func() []models.GatewayNet
+}
+
+// SetZeroTierGateways registers the provider of ZeroTier on-link networks used
+// when rendering policy routes into wg0.conf.
+func (s *Store) SetZeroTierGateways(fn func() []models.GatewayNet) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.ztGateways = fn
+}
+
+// gatewayNets returns every network a policy route gateway may point into.
+// Callers must hold the lock.
+func (s *Store) gatewayNets() []models.GatewayNet {
+	var zt []models.GatewayNet
+	if s.ztGateways != nil {
+		zt = s.ztGateways()
+	}
+	return models.GatewayNets(s.config.Server.Address, zt)
 }
 
 // OnChange registers a callback invoked with the new config after every successful write.
@@ -146,8 +168,9 @@ func (s *Store) saveYAML() error {
 }
 
 func (s *Store) renderWGConfig() error {
-	postUpCmds := routing.GeneratePostUpCommands(s.config)
-	postDownCmds := routing.GeneratePostDownCommands(s.config)
+	gateways := s.gatewayNets()
+	postUpCmds := routing.GeneratePostUpCommands(s.config, gateways)
+	postDownCmds := routing.GeneratePostDownCommands(s.config, gateways)
 
 	content, err := wireguard.RenderServerConfig(s.config, postUpCmds, postDownCmds)
 	if err != nil {

@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/yix/wg-busy/internal/config"
+	"github.com/yix/wg-busy/internal/models"
 	"github.com/yix/wg-busy/internal/wgstats"
 	"github.com/yix/wg-busy/internal/zerotier"
 )
@@ -16,6 +17,16 @@ type handler struct {
 	store *config.Store
 	stats *wgstats.Collector
 	zt    *zerotier.Supervisor
+}
+
+// ztGatewayNets returns the ZeroTier on-link networks, or nil when ZeroTier is
+// not running. It reads only the supervisor's cached snapshot, so it is safe to
+// call while the config store lock is held.
+func (h *handler) ztGatewayNets() []models.GatewayNet {
+	if h.zt == nil {
+		return nil
+	}
+	return h.zt.GatewayNets()
 }
 
 // logRejected records why a user action was rejected. The middleware logs that a

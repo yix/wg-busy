@@ -41,9 +41,12 @@ type peerFormData struct {
 	IsNew bool
 	// Defaults renders a blank form with default values checked. It is off when
 	// re-rendering after an error, so the user's own input is preserved.
-	Defaults         bool
-	Peer             models.Peer
-	ExitNodes        []models.Peer
+	Defaults  bool
+	Peer      models.Peer
+	ExitNodes []models.Peer
+	// Gateways are the subnets a policy route gateway may point into, shown as a
+	// hint on the form: the WireGuard subnet and any joined ZeroTier networks.
+	Gateways         []models.GatewayNet
 	Error            string
 	ValidationErrors models.ValidationErrors
 }
@@ -119,6 +122,7 @@ func (h *handler) GetPeerForm(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		data.ExitNodes = models.ExitNodePeers(cfg.Peers)
+		data.Gateways = models.GatewayNets(cfg.Server.Address, h.ztGatewayNets())
 	})
 
 	if !isNew && data.Peer.ID == "" {
@@ -258,7 +262,7 @@ func (h *handler) CreatePeer(w http.ResponseWriter, r *http.Request) {
 		}
 
 		// Validate.
-		if errs := peer.Validate(cfg.Server.Address); len(errs) > 0 {
+		if errs := peer.Validate(models.GatewayNets(cfg.Server.Address, h.ztGatewayNets())); len(errs) > 0 {
 			return errs
 		}
 
@@ -276,6 +280,7 @@ func (h *handler) CreatePeer(w http.ResponseWriter, r *http.Request) {
 			}
 			h.store.Read(func(cfg *models.AppConfig) {
 				data.ExitNodes = models.ExitNodePeers(cfg.Peers)
+				data.Gateways = models.GatewayNets(cfg.Server.Address, h.ztGatewayNets())
 			})
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
 			w.WriteHeader(http.StatusUnprocessableEntity)
@@ -285,6 +290,7 @@ func (h *handler) CreatePeer(w http.ResponseWriter, r *http.Request) {
 		data := peerFormData{IsNew: true, Peer: peer, Error: writeErr.Error()}
 		h.store.Read(func(cfg *models.AppConfig) {
 			data.ExitNodes = models.ExitNodePeers(cfg.Peers)
+			data.Gateways = models.GatewayNets(cfg.Server.Address, h.ztGatewayNets())
 		})
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.WriteHeader(http.StatusUnprocessableEntity)
@@ -409,7 +415,7 @@ func (h *handler) UpdatePeer(w http.ResponseWriter, r *http.Request) {
 			models.CascadeClearExitNode(cfg.Peers, id)
 		}
 
-		if errs := p.Validate(cfg.Server.Address); len(errs) > 0 {
+		if errs := p.Validate(models.GatewayNets(cfg.Server.Address, h.ztGatewayNets())); len(errs) > 0 {
 			submitted = *p
 			return errs
 		}
@@ -423,6 +429,7 @@ func (h *handler) UpdatePeer(w http.ResponseWriter, r *http.Request) {
 			data := peerFormData{Peer: submitted, ValidationErrors: ve}
 			h.store.Read(func(cfg *models.AppConfig) {
 				data.ExitNodes = models.ExitNodePeers(cfg.Peers)
+				data.Gateways = models.GatewayNets(cfg.Server.Address, h.ztGatewayNets())
 			})
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
 			w.WriteHeader(http.StatusUnprocessableEntity)

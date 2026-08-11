@@ -19,7 +19,7 @@ WG-Busy is a web-based UI for managing a WireGuard server. It is inspired by pro
   - **Flexible Exit Nodes**: Any peer can be an exit node for any other peer.
   - **Split Tunneling**: Configure exit nodes to route all traffic or only specific subnets.
   - **Advertised Routes**: Expose networks behind a peer to the VPN.
-  - **Policy Routing**: Define custom routes with specific gateways (`CIDR via IP`) per peer, automatically managing Linux policy routing tables.
+  - **Policy Routing**: Define custom routes with specific gateways (`CIDR via IP`) per peer, automatically managing Linux policy routing tables. The gateway can be a WireGuard peer *or* a ZeroTier peer — each route is pinned to whichever interface its gateway is on-link for.
 - **Real-time Stats**: Live bandwidth usage, sparkline graphs, connection status, and actual peer endpoint (IP:port) display.
 - **Dynamic BGP Routing**: Native `bio-rd` integration with dual-stack (IPv4 + IPv6) support for automated route advertisement and learning right into the Linux kernel routing table, complete with a BGP dashboard and per-peer route filters.
 - **Managed ZeroTier Client**: Runs and supervises `zerotier-one` alongside WireGuard — join and leave networks from the UI, with node status, assigned addresses, managed routes, peer latency/paths, and per-interface traffic counters.
@@ -148,7 +148,9 @@ reconciled toward it.
 
 - **On/Off and Port**: Enable the client and set its primary UDP port from the ZeroTier tab. The service starts, stops, and restarts to match.
 - **Join / Leave**: Add a 16-character network ID with the `allowManaged`, `allowGlobal`, `allowDefault` and `allowDNS` flags. Networks in the config are joined, networks removed from it are left. Changing a flag on an already-joined network applies without a rejoin.
-- **Status**: Node address, online state and version, plus each network's status, assigned addresses, managed routes, MTU and interface name.
+- **Status**: Node address, this node's own ZeroTier IPs, online state and version, plus each network's status, assigned addresses, MTU and interface name.
+- **Received Routes**: The managed routes each network pushes, with their target, gateway and metric.
+- **Policy Route Gateways**: Any ZeroTier peer IP can be used as the gateway of a WireGuard peer's policy route. wg-busy pins the route to the right `zt*` interface, so traffic from a WireGuard client can be steered into a ZeroTier network.
 - **Traffic**: Per-network totals and live rates, read from the interface counters of each `zt*` device. ZeroTier's local API exposes no byte counters, so traffic is per interface, not per peer.
 - **Peers**: Address, role, version, latency, and the active physical paths (or `relayed` when no direct path exists).
 - **State**: Node identity, auth token and joined networks persist in `/app/data/zerotier`, so the node keeps its address across restarts. Requires `/dev/net/tun` and `NET_ADMIN`.
