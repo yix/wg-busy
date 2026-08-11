@@ -22,6 +22,7 @@ WG-Busy is a web-based UI for managing a WireGuard server. It is inspired by pro
   - **Policy Routing**: Define custom routes with specific gateways (`CIDR via IP`) per peer, automatically managing Linux policy routing tables.
 - **Real-time Stats**: Live bandwidth usage, sparkline graphs, connection status, and actual peer endpoint (IP:port) display.
 - **Dynamic BGP Routing**: Native `bio-rd` integration with dual-stack (IPv4 + IPv6) support for automated route advertisement and learning right into the Linux kernel routing table, complete with a BGP dashboard and per-peer route filters.
+- **Managed ZeroTier Client**: Runs and supervises `zerotier-one` alongside WireGuard — join and leave networks from the UI, with node status, assigned addresses, managed routes, peer latency/paths, and per-interface traffic counters.
 - **Multi-Architecture**: Pre-built Docker images for both `linux/amd64` and `linux/arm64`.
 - **QR Codes**: Generate configuration QR codes for mobile clients.
 
@@ -44,6 +45,8 @@ services:
     cap_add:
       - NET_ADMIN
       - SYS_MODULE
+    devices:
+      - /dev/net/tun:/dev/net/tun # Required for ZeroTier
     sysctls:
       - net.ipv4.ip_forward=1
       - net.ipv4.conf.all.src_valid_mark=1
@@ -51,6 +54,7 @@ services:
     ports:
       - "8080:8080"       # Web UI
       - "51820:51820/udp" # WireGuard
+      - "9993:9993/udp"   # ZeroTier
     volumes:
       - ./data:/app/data             # Configuration persistence
       - /lib/modules:/lib/modules:ro # Required for WireGuard kernel module
@@ -58,6 +62,7 @@ services:
       - WG_BUSY_LISTEN=:8080
       - WG_BUSY_CONFIG=/app/data/config.yaml
       - WG_BUSY_WG_CONFIG=/etc/wireguard/wg0.conf
+      - WG_BUSY_ZT_DATA=/app/data/zerotier
     restart: unless-stopped
 ```
 
@@ -134,6 +139,22 @@ add chain=wg-busy-out rule="if (dst == 192.168.10.0/24) {accept}"
 # reject all prefixes not matched by previous rules
 add chain=wg-busy-out rule=reject
 ```
+
+### ZeroTier
+
+WG-Busy bundles the `zerotier-one` client and supervises it as a child process, so ZeroTier is
+managed the same way as WireGuard: the desired state lives in `config.yaml` and the service is
+reconciled toward it.
+
+- **On/Off and Port**: Enable the client and set its primary UDP port from the ZeroTier tab. The service starts, stops, and restarts to match.
+- **Join / Leave**: Add a 16-character network ID with the `allowManaged`, `allowGlobal`, `allowDefault` and `allowDNS` flags. Networks in the config are joined, networks removed from it are left. Changing a flag on an already-joined network applies without a rejoin.
+- **Status**: Node address, online state and version, plus each network's status, assigned addresses, managed routes, MTU and interface name.
+- **Traffic**: Per-network totals and live rates, read from the interface counters of each `zt*` device. ZeroTier's local API exposes no byte counters, so traffic is per interface, not per peer.
+- **Peers**: Address, role, version, latency, and the active physical paths (or `relayed` when no direct path exists).
+- **State**: Node identity, auth token and joined networks persist in `/app/data/zerotier`, so the node keeps its address across restarts. Requires `/dev/net/tun` and `NET_ADMIN`.
+
+Members still need to be authorized in ZeroTier Central (or your own controller) before a network
+leaves `ACCESS_DENIED` and gets an address.
 
 ## Development
 

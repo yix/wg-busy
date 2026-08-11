@@ -437,6 +437,190 @@ var templates = template.Must(template.New("").Funcs(template.FuncMap{
 </div>
 {{end}}
 
+{{define "zerotier-tab"}}
+<div id="zerotier">
+    <div class="header-row">
+        <h2>ZeroTier</h2>
+        <div class="btn-group">
+            <button class="btn btn-outline secondary" hx-post="api/zerotier/restart"
+                    hx-target="#zerotier-action-result" hx-swap="innerHTML"
+                    hx-confirm="Restart the ZeroTier service?">
+                Restart Service
+            </button>
+        </div>
+    </div>
+
+    <div id="zerotier-action-result"></div>
+
+    {{if .Success}}<div class="toast toast-success" role="alert">{{.Success}}</div>{{end}}
+    {{if .Error}}<div class="toast toast-error" role="alert">{{.Error}}</div>{{end}}
+    {{template "error-summary" .ValidationErrors}}
+
+    <form hx-put="zerotier" hx-target="#tab-content" hx-swap="innerHTML">
+        <fieldset>
+            <label>
+                <input type="checkbox" name="ztEnabled" {{if .Config.Enabled}}checked{{end}}>
+                Enable ZeroTier
+            </label>
+        </fieldset>
+        <div class="grid">
+            <label>
+                Primary Port
+                <input type="number" name="ztPort" value="{{.Port}}" min="1024" max="65535"
+                       placeholder="9993"
+                       {{if .ValidationErrors.HasField "ztPort"}}aria-invalid="true"{{end}}>
+                <small>UDP port for peer-to-peer traffic. Changing it restarts the service.</small>
+            </label>
+        </div>
+        <button type="submit" class="btn btn-primary">Save Settings</button>
+    </form>
+
+    <h3>Networks</h3>
+    <form hx-post="zerotier/networks" hx-target="#tab-content" hx-swap="innerHTML">
+        <div class="grid">
+            <label>
+                Network ID *
+                <input type="text" name="networkID" required minlength="16" maxlength="16"
+                       placeholder="8056c2e21c000001" pattern="[0-9a-fA-F]{16}">
+            </label>
+            <label>
+                Label
+                <input type="text" name="networkName" maxlength="64" placeholder="e.g. Home LAN">
+            </label>
+        </div>
+        <fieldset>
+            <label><input type="checkbox" name="allowManaged" checked> Allow managed IPs and routes</label>
+            <label><input type="checkbox" name="allowGlobal"> Allow global (public) IP assignments</label>
+            <label><input type="checkbox" name="allowDefault"> Allow default route override</label>
+            <label><input type="checkbox" name="allowDNS"> Allow DNS configuration</label>
+        </fieldset>
+        <button type="submit" class="btn btn-primary">Join Network</button>
+    </form>
+
+    <div id="zerotier-status" hx-get="zerotier/status" hx-trigger="every 2s" hx-swap="innerHTML">
+        {{template "zerotier-status" .}}
+    </div>
+</div>
+{{end}}
+
+{{define "zerotier-status"}}
+{{if not .Config.Enabled}}
+<article class="toast toast-error">ZeroTier is disabled. Enable it above to start the service.</article>
+{{else}}
+    {{if .Snapshot.Err}}<div class="toast toast-error" role="alert">{{.Snapshot.Err}}</div>{{end}}
+
+    <div class="grid" style="margin-bottom: 2rem;">
+        <article>
+            <header><strong>Service</strong></header>
+            {{if .Snapshot.Running}}
+            <span class="status-dot status-up"></span> Running {{.Uptime}}
+            {{else}}
+            <span class="status-dot status-down"></span> Not running
+            {{end}}
+        </article>
+        <article>
+            <header><strong>Node Address</strong></header>
+            {{if .Snapshot.Status}}<code>{{.Snapshot.Status.Address}}</code>{{else}}&mdash;{{end}}
+        </article>
+        <article>
+            <header><strong>Online</strong></header>
+            {{if .Snapshot.Status}}
+                {{if .Snapshot.Status.Online}}
+                <span class="status-dot status-up"></span> Online{{if .Snapshot.Status.TCPFallbackActive}} (TCP relay){{end}}
+                {{else}}
+                <span class="status-dot status-down"></span> Offline
+                {{end}}
+                <div><small class="text-muted">v{{.Snapshot.Status.Version}}</small></div>
+            {{else}}&mdash;{{end}}
+        </article>
+    </div>
+
+    <h4>Joined Networks ({{len .Networks}})</h4>
+    {{if not .Networks}}
+    <p>No networks joined yet.</p>
+    {{else}}
+    {{range .Networks}}
+    <article style="margin-bottom: 1.5rem;">
+        <header class="flex-row">
+            <strong>
+                {{if .Label}}{{.Label}} &mdash; {{end}}<code>{{.ID}}</code>
+                {{if .Name}}<span class="badge badge-via">{{.Name}}</span>{{end}}
+                {{if eq .Status "OK"}}<span class="badge badge-ok">{{.Status}}</span>{{else}}<span class="badge badge-warn">{{.Status}}</span>{{end}}
+            </strong>
+            <button class="btn btn-outline-danger" style="width:auto"
+                    hx-delete="zerotier/networks/{{.ID}}"
+                    hx-target="#tab-content" hx-swap="innerHTML"
+                    hx-confirm="Leave network {{.ID}}?">
+                Leave
+            </button>
+        </header>
+
+        <p>
+            <small>
+                {{if .AssignedAddresses}}{{range $i, $a := .AssignedAddresses}}{{if $i}}, {{end}}<code>{{$a}}</code>{{end}}{{else}}No address assigned{{end}}
+                {{if .PortDeviceName}} &middot; {{.PortDeviceName}}{{end}}
+                {{if .MTU}} &middot; MTU {{.MTU}}{{end}}
+                {{if .Type}} &middot; {{.Type}}{{end}}
+            </small>
+        </p>
+
+        <p>
+            {{if .PortDeviceName}}
+            <span class="stats-rx">&darr; {{if .RxPS}}{{.RxPS}} {{end}}<small class="text-muted">({{.Rx}})</small></span>
+            <span class="stats-tx">&uarr; {{if .TxPS}}{{.TxPS}} {{end}}<small class="text-muted">({{.Tx}})</small></span>
+            {{else}}
+            <small class="text-muted">No interface yet &mdash; traffic counters appear once the network is authorized.</small>
+            {{end}}
+        </p>
+
+        {{if .Routes}}
+        <details>
+            <summary>Managed Routes ({{len .Routes}})</summary>
+            <table role="grid">
+                <thead><tr><th scope="col">Target</th><th scope="col">Via</th><th scope="col">Metric</th></tr></thead>
+                <tbody>
+                {{range .Routes}}
+                <tr><td>{{.Target}}</td><td>{{if .Via}}{{.Via}}{{else}}(local){{end}}</td><td>{{.Metric}}</td></tr>
+                {{end}}
+                </tbody>
+            </table>
+        </details>
+        {{end}}
+    </article>
+    {{end}}
+    {{end}}
+
+    <h4>Peers ({{len .Peers}})</h4>
+    {{if not .Peers}}
+    <p>No peers known.</p>
+    {{else}}
+    <table role="grid">
+        <thead>
+            <tr>
+                <th scope="col">Address</th>
+                <th scope="col">Role</th>
+                <th scope="col">Version</th>
+                <th scope="col">Latency</th>
+                <th scope="col">Paths</th>
+            </tr>
+        </thead>
+        <tbody>
+            {{range .Peers}}
+            <tr>
+                <td><code>{{.Address}}</code></td>
+                <td>{{.Role}}</td>
+                <td>{{if .Version}}{{.Version}}{{else}}&mdash;{{end}}</td>
+                <td>{{.LatencyText}}</td>
+                <td><small>{{.PathText}}</small></td>
+            </tr>
+            {{end}}
+        </tbody>
+    </table>
+    <p><small class="text-muted">ZeroTier does not report per-peer byte counters; traffic is shown per network interface above.</small></p>
+    {{end}}
+{{end}}
+{{end}}
+
 {{define "bgp-stats"}}
 <div id="bgp-stats">
     <div class="header-row">

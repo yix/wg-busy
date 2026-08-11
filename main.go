@@ -6,7 +6,10 @@ import (
 	"io/fs"
 	"log"
 	"net/http"
+	"os"
 	"os/exec"
+	"os/signal"
+	"syscall"
 	"time"
 
 	"github.com/yix/wg-busy/internal/bgp"
@@ -15,6 +18,7 @@ import (
 	"github.com/yix/wg-busy/internal/models"
 	"github.com/yix/wg-busy/internal/wgstats"
 	"github.com/yix/wg-busy/internal/wireguard"
+	"github.com/yix/wg-busy/internal/zerotier"
 )
 
 //go:embed web/*
@@ -26,6 +30,7 @@ func main() {
 	listen := flag.String("listen", ":8080", "HTTP listen address")
 	configPath := flag.String("config", "./data/config.yaml", "Path to YAML config file")
 	wgConfigPath := flag.String("wg-config", "/etc/wireguard/wg0.conf", "Path to write wg0.conf")
+	ztDataPath := flag.String("zt-data", "./data/zerotier", "ZeroTier home directory (identity, authtoken, joined networks)")
 	flag.Parse()
 
 	store, err := config.Load(*configPath, *wgConfigPath)
@@ -67,6 +72,24 @@ func main() {
 		})
 	}
 
+	// ZeroTier runs as a supervised child process. Configure only records the
+	// desired state; the supervisor's goroutine does the starting and joining.
+	zt := zerotier.New(*ztDataPath)
+	store.OnChange(zt.Configure)
+	store.Read(func(cfg *models.AppConfig) { zt.Configure(cfg) })
+	zt.Start()
+
+	// Go does not run defers on signals, so shut the child down explicitly —
+	// otherwise zerotier-one outlives us and keeps holding its port.
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+	go func() {
+		sig := <-sigCh
+		log.Printf("received %s, shutting down", sig)
+		zt.Stop()
+		os.Exit(0)
+	}()
+
 	// Start stats collector.
 	stats := wgstats.NewCollector()
 	if !wgStartedAt.IsZero() {
@@ -81,7 +104,7 @@ func main() {
 		log.Fatalf("embedded filesystem: %v", err)
 	}
 
-	mux := handlers.NewRouter(store, webContent, stats)
+	mux := handlers.NewRouter(store, webContent, stats, zt)
 
 	log.Printf("wg-busy %s listening on %s", version, *listen)
 	if err := http.ListenAndServe(*listen, mux); err != nil {

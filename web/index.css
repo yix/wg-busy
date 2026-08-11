@@ -601,6 +601,16 @@ dialog article {
   color: var(--text-muted);
 }
 
+.badge-ok {
+  background: var(--success);
+  color: #fff;
+}
+
+.badge-warn {
+  background: var(--danger);
+  color: #fff;
+}
+
 /* Additional Utilities */
 .header-row {
   display: flex;

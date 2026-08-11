@@ -21,6 +21,18 @@ type Store struct {
 	configPath   string
 	wgConfigPath string
 	config       models.AppConfig
+
+	// onChange is notified after a successful write. It must not block: it runs
+	// while the write lock is held, so anything slow (process control, HTTP)
+	// belongs on the receiver's own goroutine.
+	onChange func(*models.AppConfig)
+}
+
+// OnChange registers a callback invoked with the new config after every successful write.
+func (s *Store) OnChange(fn func(*models.AppConfig)) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.onChange = fn
 }
 
 // Load reads the YAML config file, or initializes defaults if it doesn't exist.
@@ -95,6 +107,11 @@ func (s *Store) Write(fn func(cfg *models.AppConfig) error) error {
 
 	if err := wireguard.ReloadWGConfig(); err != nil {
 		log.Printf("reloading wg server: %v", err)
+	}
+
+	// After persistence, so a failure here can never trigger the rollback above.
+	if s.onChange != nil {
+		s.onChange(&s.config)
 	}
 
 	return nil

@@ -51,11 +51,15 @@ wg-busy/
 │   ├── ipam/ipam.go              # IP address allocation
 │   ├── routing/routing.go        # Exit node policy routing command generation
 │   ├── wgstats/wgstats.go       # Background stats collector (wg show polling, ring buffer)
+│   ├── zerotier/
+│   │   ├── client.go             # ZeroTier local control API client (127.0.0.1:9993)
+│   │   └── zerotier.go           # Service supervisor: process, network reconcile, counters
 │   └── handlers/
-│       ├── handlers.go           # Router, handler struct
+│       ├── handlers.go           # Router, handler struct, error logging middleware
 │       ├── templates.go          # html/template definitions
 │       ├── peers.go              # Peer CRUD (HTML fragments)
 │       ├── server.go             # Server config (HTML fragments)
+│       ├── zerotier.go           # ZeroTier tab, join/leave, restart (HTML fragments)
 │       ├── export.go             # Download/apply config
 │       └── stats.go              # Stats bar + QR code handlers
 ├── web/
@@ -71,8 +75,9 @@ wg-busy/
 
 ```go
 type AppConfig struct {
-    Server ServerConfig `yaml:"server"`
-    Peers  []Peer       `yaml:"peers"`
+    Server   ServerConfig   `yaml:"server"`
+    Peers    []Peer         `yaml:"peers"`
+    ZeroTier ZeroTierConfig `yaml:"zerotier,omitempty"`
 }
 ```
 
@@ -536,6 +541,12 @@ PUT  /server                    → update config → return form + success toas
 
 GET  /stats                     → stats bar HTML fragment (polled every 2s)
 GET  /bgp/stats                 → BGP statistics fragment
+
+GET  /zerotier                  → ZeroTier tab (settings + status + networks + peers)
+GET  /zerotier/status           → live status fragment (polled every 2s while the tab is open)
+PUT  /zerotier                  → enable/disable + primary port → return tab
+POST /zerotier/networks         → join (or update flags of) a network → return tab
+DELETE /zerotier/networks/{id}  → leave a network → return tab
 ```
 
 ### File/Action Endpoints
@@ -546,7 +557,51 @@ GET  /api/peers/{id}/qr                 → QR code PNG of client .conf
 GET  /api/server/config                 → download wg0.conf (with routing rules)
 POST /api/server/apply                  → wg-quick down/up
 POST /api/peers/{id}/regenerate-keys    → new keypair → return updated form
+POST /api/zerotier/restart              → restart zerotier-one → toast
 ```
+
+## ZeroTier (`internal/zerotier/`)
+
+The ZeroTier client runs as a supervised child process. Desired state lives in `config.yaml`
+(`ZeroTierConfig`); the service is reconciled toward it.
+
+### Why a supervisor goroutine, not `Configure()` like BGP
+
+`bgp.Configure` runs in-process and returns in microseconds, so `config.Store.Write` calls it while
+holding the write lock. Every ZeroTier operation is a blocking HTTP call to the local control API,
+so the same pattern would hold the write lock for seconds against a wedged daemon — blocking every
+`Store.Read`, including the status handler.
+
+Instead `Store.OnChange` notifies `Supervisor.Configure`, which only copies the desired config and
+bumps a generation counter. One background goroutine (2s tick, the same interval as `wgstats`) does
+all the work:
+
+1. **Process**: start `zerotier-one -p<port> <homeDir>` when enabled and not running, SIGTERM when
+   disabled, restart when the port changes. A crashed daemon is restarted on the next tick, subject
+   to a 15s backoff so a broken binary cannot spin.
+2. **Networks** (only when the generation changed): `POST /network/{id}` for *every* configured
+   network — the endpoint is join-or-update, which is how a changed `allow*` flag reaches the
+   service — plus `DELETE` for any joined network no longer in the config.
+3. **Counters**: read `/sys/class/net/<portDeviceName>/statistics/{rx,tx}_bytes` per network and
+   derive rates against the previous tick.
+
+Owning the tick also keeps rates correct when several browsers poll the status fragment at once:
+a delta derived from consecutive HTTP requests would be split between concurrent pollers.
+
+### Traffic data
+
+ZeroTier's local API exposes no byte counters anywhere — `/peer` reports latency, role, version and
+paths; `/network` reports configuration. Traffic therefore comes from the OS interface counters of
+the `zt*` device, which makes it **per network, not per peer**. Totals and rates are formatted with
+the existing `wgstats.FormatBytes` / `FormatBytesPerSec`.
+
+### Data directory and packaging
+
+`-zt-data` (default `./data/zerotier`, `/app/data/zerotier` in the container) holds
+`identity.secret`, `authtoken.secret` and `networks.d`; persisting it keeps the node's ZeroTier
+address stable across restarts. The binary is copied into the image from the Alpine/musl-built
+`zyclonite/zerotier` image, because Alpine dropped its own `zerotier-one` package after 3.17.
+The service needs `/dev/net/tun` and `NET_ADMIN` to create interfaces.
 
 ## UI Layout (Updated)
 
@@ -557,11 +612,11 @@ POST /api/peers/{id}/regenerate-keys    → new keypair → return updated form
 │  ┌── #stats-bar (hx-trigger every 2s) ┐ │
 │  │ ● wg0 up 2h 15m │ ↓1.2GB ↑340MB │▁▃│ │
 │  └────────────────────────────────────┘ │
-├──────────────┬─────────────────────────┬─────────┤
-│ [Peers]      │ [Server]                │ [BGP]   │
-├──────────────┴─────────────────────────┴─────────┤
+├──────────┬───────────┬───────┬────────────┤
+│ [Peers]  │ [Server]  │ [BGP] │ [ZeroTier] │
+├──────────┴───────────┴───────┴────────────┴──────┤
 │  ┌── #tab-content ─────────────────────────────┐ │
-│  │  (Peers list OR Server config OR BGP tab)   │ │
+│  │  (Peers / Server config / BGP / ZeroTier)   │ │
 │  └─────────────────────────────────────────────┘ │
 │  ┌── #modal-container ─────────────────┐ │
 │  │  (<dialog> for peer form / QR code) │ │

@@ -84,6 +84,10 @@
                 onclick="selectTab(this)">
                 BGP
             </button>
+            <button id="tab-zerotier" role="tab" hx-get="zerotier" hx-target="#tab-content" hx-swap="innerHTML"
+                onclick="selectTab(this)">
+                ZeroTier
+            </button>
         </div>
 
         <div id="tab-content" hx-get="peers" hx-trigger="load" hx-swap="innerHTML">

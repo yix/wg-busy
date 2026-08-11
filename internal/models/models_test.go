@@ -52,6 +52,47 @@ func validPeer() Peer {
 	}
 }
 
+func TestZeroTierValidate(t *testing.T) {
+	tests := []struct {
+		name    string
+		cfg     ZeroTierConfig
+		wantErr bool
+	}{
+		{"valid", ZeroTierConfig{Networks: []ZeroTierNetwork{{ID: "8056c2e21c000001"}}}, false},
+		{"uppercase id", ZeroTierConfig{Networks: []ZeroTierNetwork{{ID: "8056C2E21C000001"}}}, false},
+		{"empty config", ZeroTierConfig{}, false},
+		{"default port", ZeroTierConfig{Port: 0}, false},
+		{"custom port", ZeroTierConfig{Port: 9994}, false},
+		{"privileged port", ZeroTierConfig{Port: 80}, true},
+		{"missing id", ZeroTierConfig{Networks: []ZeroTierNetwork{{ID: ""}}}, true},
+		{"short id", ZeroTierConfig{Networks: []ZeroTierNetwork{{ID: "8056c2e21c00"}}}, true},
+		{"non-hex id", ZeroTierConfig{Networks: []ZeroTierNetwork{{ID: "8056c2e21c00000z"}}}, true},
+		{"duplicate ids", ZeroTierConfig{Networks: []ZeroTierNetwork{
+			{ID: "8056c2e21c000001"}, {ID: "8056C2E21C000001"},
+		}}, true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			errs := tt.cfg.Validate()
+			if (len(errs) > 0) != tt.wantErr {
+				t.Errorf("Validate() = %v, want error: %v", errs, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestZeroTierPortDefault(t *testing.T) {
+	var z ZeroTierConfig
+	if got := z.ZeroTierPort(); got != 9993 {
+		t.Errorf("default port = %d, want 9993", got)
+	}
+	z.Port = 9994
+	if got := z.ZeroTierPort(); got != 9994 {
+		t.Errorf("configured port = %d, want 9994", got)
+	}
+}
+
 func TestValidPeerHasNoErrors(t *testing.T) {
 	p := validPeer()
 	if errs := p.Validate("10.0.0.1/24"); len(errs) > 0 {

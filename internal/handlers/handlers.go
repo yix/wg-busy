@@ -9,11 +9,13 @@ import (
 
 	"github.com/yix/wg-busy/internal/config"
 	"github.com/yix/wg-busy/internal/wgstats"
+	"github.com/yix/wg-busy/internal/zerotier"
 )
 
 type handler struct {
 	store *config.Store
 	stats *wgstats.Collector
+	zt    *zerotier.Supervisor
 }
 
 // logRejected records why a user action was rejected. The middleware logs that a
@@ -61,8 +63,8 @@ func logErrors(next http.Handler) http.Handler {
 }
 
 // NewRouter creates the HTTP mux with all routes registered.
-func NewRouter(store *config.Store, webFS fs.FS, stats *wgstats.Collector) http.Handler {
-	h := &handler{store: store, stats: stats}
+func NewRouter(store *config.Store, webFS fs.FS, stats *wgstats.Collector, zt *zerotier.Supervisor) http.Handler {
+	h := &handler{store: store, stats: stats, zt: zt}
 
 	mux := http.NewServeMux()
 
@@ -91,12 +93,20 @@ func NewRouter(store *config.Store, webFS fs.FS, stats *wgstats.Collector) http.
 	// BGP stats fragment.
 	mux.HandleFunc("GET /bgp/stats", h.GetBGPStatsTab)
 
+	// ZeroTier fragment endpoints.
+	mux.HandleFunc("GET /zerotier", h.GetZeroTierTab)
+	mux.HandleFunc("GET /zerotier/status", h.GetZeroTierStatus)
+	mux.HandleFunc("PUT /zerotier", h.UpdateZeroTier)
+	mux.HandleFunc("POST /zerotier/networks", h.JoinZeroTierNetwork)
+	mux.HandleFunc("DELETE /zerotier/networks/{id}", h.LeaveZeroTierNetwork)
+
 	// API endpoints.
 	mux.HandleFunc("GET /api/peers/{id}/config", h.DownloadClientConfig)
 	mux.HandleFunc("GET /api/peers/{id}/qr", h.QRCode)
 	mux.HandleFunc("GET /api/server/config", h.DownloadServerConfig)
 	mux.HandleFunc("POST /api/server/apply", h.ApplyConfig)
 	mux.HandleFunc("POST /api/peers/{id}/regenerate-keys", h.RegeneratePeerKeys)
+	mux.HandleFunc("POST /api/zerotier/restart", h.RestartZeroTier)
 
 	return logErrors(mux)
 }

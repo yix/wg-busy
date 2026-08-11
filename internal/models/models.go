@@ -12,8 +12,44 @@ import (
 
 // AppConfig is the top-level structure persisted to YAML.
 type AppConfig struct {
-	Server ServerConfig `yaml:"server"`
-	Peers  []Peer       `yaml:"peers"`
+	Server   ServerConfig   `yaml:"server"`
+	Peers    []Peer         `yaml:"peers"`
+	ZeroTier ZeroTierConfig `yaml:"zerotier,omitempty"`
+}
+
+// ZeroTierConfig is the desired state of the local ZeroTier client.
+type ZeroTierConfig struct {
+	Enabled  bool              `yaml:"enabled,omitempty"`
+	Port     uint16            `yaml:"port,omitempty"` // primary port, 0 means the default 9993
+	Networks []ZeroTierNetwork `yaml:"networks,omitempty"`
+}
+
+// ZeroTierNetwork is a network the client should be joined to.
+type ZeroTierNetwork struct {
+	ID           string `yaml:"id"`             // 16 hex characters
+	Name         string `yaml:"name,omitempty"` // local label, not the network's own name
+	AllowManaged bool   `yaml:"allowManaged"`
+	AllowGlobal  bool   `yaml:"allowGlobal,omitempty"`
+	AllowDefault bool   `yaml:"allowDefault,omitempty"`
+	AllowDNS     bool   `yaml:"allowDNS,omitempty"`
+}
+
+// ZeroTierPort returns the configured primary port, or the ZeroTier default.
+func (z *ZeroTierConfig) ZeroTierPort() uint16 {
+	if z.Port == 0 {
+		return 9993
+	}
+	return z.Port
+}
+
+// FindZeroTierNetwork returns a pointer to the network with the given ID, or nil.
+func FindZeroTierNetwork(networks []ZeroTierNetwork, id string) *ZeroTierNetwork {
+	for i := range networks {
+		if strings.EqualFold(networks[i].ID, id) {
+			return &networks[i]
+		}
+	}
+	return nil
 }
 
 // ServerConfig represents the [Interface] section of wg0.conf.
@@ -196,6 +232,40 @@ func (s *ServerConfig) Validate() ValidationErrors {
 		}
 		if s.BGPASN == 0 {
 			errs = append(errs, ValidationError{Field: "bgpAsn", Message: "required when BGP is enabled"})
+		}
+	}
+
+	return errs
+}
+
+var networkIDRegexp = regexp.MustCompile(`^[0-9a-fA-F]{16}$`)
+
+// Validate checks the ZeroTier configuration and returns all errors found.
+func (z *ZeroTierConfig) Validate() ValidationErrors {
+	var errs ValidationErrors
+
+	if z.Port != 0 && z.Port < 1024 {
+		errs = append(errs, ValidationError{Field: "ztPort", Message: "must be 1024-65535, or empty for the default (9993)"})
+	}
+
+	seen := make(map[string]bool, len(z.Networks))
+	for i, n := range z.Networks {
+		id := strings.ToLower(strings.TrimSpace(n.ID))
+		field := fmt.Sprintf("ztNetworks[%d].id", i)
+
+		switch {
+		case id == "":
+			errs = append(errs, ValidationError{Field: field, Message: "required"})
+		case !networkIDRegexp.MatchString(id):
+			errs = append(errs, ValidationError{Field: field, Message: fmt.Sprintf("must be 16 hexadecimal characters: %s", n.ID)})
+		case seen[id]:
+			errs = append(errs, ValidationError{Field: field, Message: fmt.Sprintf("duplicate network: %s", n.ID)})
+		default:
+			seen[id] = true
+		}
+
+		if len(n.Name) > 64 {
+			errs = append(errs, ValidationError{Field: fmt.Sprintf("ztNetworks[%d].name", i), Message: "maximum 64 characters"})
 		}
 	}
 

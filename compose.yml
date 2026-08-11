@@ -8,6 +8,8 @@ services:
     cap_add:
       - NET_ADMIN
       - SYS_MODULE
+    devices:
+      - /dev/net/tun:/dev/net/tun # ZeroTier creates its interfaces through here
     sysctls:
       - net.ipv4.ip_forward=1
       - net.ipv4.conf.all.src_valid_mark=1
@@ -16,6 +18,7 @@ services:
       - "11179:11179/tcp" # BGP
       - "8080:8080" # Web UI
       - "51820:51820/udp" # WireGuard
+      - "9993:9993/udp" # ZeroTier
     volumes:
       - $PWD/data:/app/data # config.yaml persistence
       - /lib/modules:/lib/modules:ro # kernel modules for wireguard
@@ -23,4 +26,5 @@ services:
       - WG_BUSY_LISTEN=:8080
       - WG_BUSY_CONFIG=/app/data/config.yaml
       - WG_BUSY_WG_CONFIG=/etc/wireguard/wg0.conf
+      - WG_BUSY_ZT_DATA=/app/data/zerotier
     restart: unless-stopped

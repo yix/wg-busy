@@ -46,10 +46,12 @@ docker-run: build docker-build ## Build and run in Docker with WireGuard capabil
 	docker run --rm -it \
 		--cap-add NET_ADMIN \
 		--cap-add SYS_MODULE \
+		--device /dev/net/tun:/dev/net/tun \
 		--sysctl net.ipv4.ip_forward=1 \
 		--sysctl net.ipv4.conf.all.src_valid_mark=1 \
 		-p 8080:8080 \
 		-p 51820:51820/udp \
+		-p 9993:9993/udp \
 		-v $(PWD)/data:/app/data \
 		$(APP_NAME):latest
 
