@@ -732,8 +732,8 @@ var templates = template.Must(template.New("").Funcs(template.FuncMap{
     <p>No BGP peers configured.</p>
     {{else}}
     {{range .Peers}}
-    <article style="margin-bottom: 2rem;">
-        <header style="display: flex; justify-content: space-between; align-items: center;">
+    <article>
+        <header class="flex-row">
             <strong>{{.IP}} (AS{{.ASN}})</strong>
             <span>
                 {{if eq .State "Established"}}
@@ -748,38 +748,34 @@ var templates = template.Must(template.New("").Funcs(template.FuncMap{
 
         {{if .Routes}}
         <details>
-            <summary>View Received Routes ({{len .Routes}})</summary>
-            <figure>
-                <table role="grid">
-                    <thead>
-                        <tr>
-                            <th scope="col">Prefix</th>
-                            <th scope="col">Next Hop</th>
-                            <th scope="col">Local Pref</th>
-                            <th scope="col">AS Path</th>
-                            <th scope="col">Status</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {{range $i, $route := .Routes}}
-                        <tr {{if ne $route.Status "Accepted"}}style="opacity: 0.45;"{{end}} {{if gt $i 9}}class="expanded-route hidden-route"{{end}}>
-                            <td>{{$route.Prefix}}</td>
-                            <td>{{$route.NextHop}}</td>
-                            <td>{{$route.LocalPref}}</td>
-                            <td>{{if $route.ASPath}}{{$route.ASPath}}{{else}}Local{{end}}</td>
-                            <td>
-                                <span>{{$route.Status}}</span>
-                            </td>
-                        </tr>
-                        {{end}}
-                    </tbody>
-                </table>
-            </figure>
+            <summary><strong><small>Received routes ({{len .Routes}})</small></strong></summary>
+            <table role="grid">
+                <thead>
+                    <tr>
+                        <th scope="col">Prefix</th>
+                        <th scope="col">Next Hop</th>
+                        <th scope="col">Local Pref</th>
+                        <th scope="col">AS Path</th>
+                        <th scope="col">Status</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {{range $i, $route := .Routes}}
+                    <tr class="{{if ne $route.Status "Accepted"}}route-filtered{{end}} {{if gt $i 9}}hidden-route{{end}}">
+                        <td><code>{{$route.Prefix}}</code></td>
+                        <td><code>{{$route.NextHop}}</code></td>
+                        <td>{{$route.LocalPref}}</td>
+                        <td>{{if $route.ASPath}}{{$route.ASPath}}{{else}}Local{{end}}</td>
+                        <td>
+                            {{if eq $route.Status "Accepted"}}<span class="badge badge-ok">{{$route.Status}}</span>
+                            {{else}}<span class="badge badge-via">{{$route.Status}}</span>{{end}}
+                        </td>
+                    </tr>
+                    {{end}}
+                </tbody>
+            </table>
             {{if gt (len .Routes) 10}}
-            <button class="btn btn-outline secondary" onclick="this.style.display='none'; Array.from(this.previousElementSibling.querySelectorAll('.hidden-route')).forEach(function(el){el.style.display='table-row'});">Show All {{len .Routes}} Routes</button>
-            <style>
-                .hidden-route { display: none; }
-            </style>
+            <button class="btn btn-outline secondary" onclick="showAllRoutes(this)">Show All {{len .Routes}} Routes</button>
             {{end}}
         </details>
         {{end}}

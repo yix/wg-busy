@@ -201,6 +201,14 @@ details summary {
   outline: none;
 }
 
+/* A details inside a card is part of that card, not a second one nested in it. */
+article details {
+  background: transparent;
+  border: none;
+  padding: 0;
+  margin-bottom: 0;
+}
+
 details > *:not(summary) {
   margin-top: 1rem;
 }
@@ -562,6 +570,16 @@ dialog article {
   vertical-align: middle;
   margin-left: 0.5rem;
   line-height: 0;
+}
+
+/* Routes a filter rejected: shown, but visibly not in the routing table. */
+.route-filtered {
+  opacity: 0.45;
+}
+
+/* Long route lists render collapsed until "Show All". */
+.hidden-route {
+  display: none;
 }
 
 /* Badges */

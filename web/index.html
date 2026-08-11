@@ -172,6 +172,13 @@
             }
         }
 
+        function showAllRoutes(btn) {
+            btn.style.display = 'none';
+            btn.closest('details').querySelectorAll('.hidden-route').forEach(function (row) {
+                row.classList.remove('hidden-route');
+            });
+        }
+
         function addRouteFilterRow() {
             var list = document.getElementById('bgp-route-filters-list');
             if (!list) return;
