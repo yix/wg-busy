@@ -260,15 +260,6 @@ button:active, .btn:active {
   color: var(--text-main);
 }
 
-.btn-danger, button.danger {
-  background-color: var(--danger);
-  color: #fff;
-}
-
-.btn-danger:hover, button.danger:hover {
-  background-color: var(--danger-hover);
-}
-
 .btn-outline-danger, button.outline-danger {
   background-color: transparent;
   color: var(--danger);
@@ -455,13 +446,6 @@ dialog article {
 }
 
 /* Peer Rows */
-.peer-list {
-  background: var(--card-bg);
-  border: 1px solid var(--border-color);
-  border-radius: var(--border-radius-lg);
-  box-shadow: var(--box-shadow);
-}
-
 .peer-row {
   display: flex;
   justify-content: space-between;
@@ -640,10 +624,6 @@ dialog article {
 }
 
 .mb-0 { margin-bottom: 0 !important; }
-.mb-1 { margin-bottom: 0.25rem !important; }
-.mb-2 { margin-bottom: 0.5rem !important; }
-.mb-3 { margin-bottom: 1rem !important; }
-.mb-4 { margin-bottom: 1.5rem !important; }
 
 /* Responsive adjustments */
 @media (max-width: 640px) {

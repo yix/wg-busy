@@ -39,6 +39,28 @@ var templates = template.Must(template.New("").Funcs(template.FuncMap{
 {{end}}
 {{end}}
 
+{{/* The polled stats fragment: the bar itself, plus an out-of-band swap per
+     peer row so the list's own stats refresh on the same tick. */}}
+{{define "stats-bar"}}
+<div class="stats-bar-inner">
+    <span class="stats-status">
+        {{if .IsUp}}
+        <span class="status-dot status-up"></span> wg0 up {{.Uptime}}
+        {{else}}
+        <span class="status-dot status-down"></span> wg0 down
+        {{end}}
+    </span>
+    <span class="stats-transfer">
+        <span class="stats-rx">&darr; {{.CurrentRxPS}} <small class="text-muted">({{.TotalRx}})</small></span>
+        <span class="stats-tx">&uarr; {{.CurrentTxPS}} <small class="text-muted">({{.TotalTx}})</small></span>
+    </span>
+    <span class="stats-sparkline">{{.SparklineSVG | safeHTML}}</span>
+</div>
+{{range .Peers}}
+<small id="peer-stats-{{.Peer.ID}}" hx-swap-oob="true">{{template "peer-stats" .}}</small>
+{{end}}
+{{end}}
+
 {{define "peers-list"}}
 <div id="peers-list" {{if .OOB}}hx-swap-oob="true"{{end}}>
     <div class="header-row">

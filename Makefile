@@ -3,7 +3,7 @@ BUILD_DIR := bin
 VERSION := $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
 LDFLAGS := -ldflags "-s -w -X main.version=$(VERSION)"
 
-.PHONY: all build build-amd64 build-arm64 run dev clean test lint fmt tidy docker-build docker-run help
+.PHONY: all build build-amd64 build-arm64 dev clean test lint fmt tidy docker-build docker-run help
 
 all: build
 
@@ -16,9 +16,6 @@ build-amd64: ## Build Linux amd64 binary
 build-arm64: ## Build Linux arm64 binary
 	@mkdir -p $(BUILD_DIR)
 	GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build $(LDFLAGS) -o $(BUILD_DIR)/$(APP_NAME)-arm64 .
-
-run: build ## Build and run locally
-	$(BUILD_DIR)/$(APP_NAME)-amd64 -listen :8080 -config ./data/config.yaml -wg-config ./data/wg0.conf
 
 dev: ## Run with go run for fast iteration
 	go run . -listen :8080 -config ./data/config.yaml -wg-config ./data/wg0.conf

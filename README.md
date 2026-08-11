@@ -59,11 +59,6 @@ services:
     volumes:
       - ./data:/app/data             # Configuration persistence
       - /lib/modules:/lib/modules:ro # Required for WireGuard kernel module
-    environment:
-      - WG_BUSY_LISTEN=:8080
-      - WG_BUSY_CONFIG=/app/data/config.yaml
-      - WG_BUSY_WG_CONFIG=/etc/wireguard/wg0.conf
-      - WG_BUSY_ZT_DATA=/app/data/zerotier
     restart: unless-stopped
 ```
 
@@ -76,18 +71,19 @@ services:
     ```
 3.  **Run**:
     ```bash
-    sudo ./bin/wg-busy -config config.yaml -wg-config /etc/wireguard/wg0.conf
+    sudo ./bin/wg-busy-amd64 -config config.yaml -wg-config /etc/wireguard/wg0.conf
     ```
 
 ## Configuration
 
-The application is configured via CLI flags or environment variables:
+The application is configured via CLI flags:
 
-| Flag | Env Var | Default | Description |
-|------|---------|---------|-------------|
-| `-listen` | `WG_BUSY_LISTEN` | `:8080` | HTTP listen address for the UI |
-| `-config` | `WG_BUSY_CONFIG` | `./data/config.yaml` | Path to the persistent YAML config file |
-| `-wg-config` | `WG_BUSY_WG_CONFIG` | `/etc/wireguard/wg0.conf` | Path where the standard WireGuard config will be rendered |
+| Flag | Default | Description |
+|------|---------|-------------|
+| `-listen` | `:8080` | HTTP listen address for the UI |
+| `-config` | `./data/config.yaml` | Path to the persistent YAML config file |
+| `-wg-config` | `/etc/wireguard/wg0.conf` | Path where the standard WireGuard config will be rendered |
+| `-zt-data` | `./data/zerotier` | ZeroTier home directory (identity, authtoken, joined networks) |
 
 ### Routing & Advanced Traffic Management
 

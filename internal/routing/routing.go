@@ -137,25 +137,25 @@ func policyRouteCmd(action, subnet, gateway string, table uint, gateways []model
 	return fmt.Sprintf("ip route %s %s via %s dev %s table %d || true", action, subnet, gateway, dev, table)
 }
 
-// GeneratePostUpCommands returns ip rule/route commands for wg0.conf PostUp.
-// Order: first create routing tables for exit nodes, then add rules for peers.
-// gateways are the on-link networks policy route gateways may point into.
-func GeneratePostUpCommands(cfg models.AppConfig, gateways []models.GatewayNet) []string {
-	exitNodes := make(map[string]models.Peer) // id -> peer
+// enabledExitNodes returns the exit nodes traffic can currently be steered to,
+// keyed by peer ID.
+func enabledExitNodes(cfg models.AppConfig) map[string]models.Peer {
+	exitNodes := make(map[string]models.Peer)
 	for _, p := range cfg.Peers {
 		if p.IsExitNode && p.Enabled && p.RoutingTableID > 0 {
 			exitNodes[p.ID] = p
 		}
 	}
+	return exitNodes
+}
 
-	// No early return when there are no exit nodes: custom policy routes are
-	// independent of them and must still be emitted.
+// exitNodeRouteCmds renders the routing table entries for each exit node.
+// action is "replace" on the way up and "del" on the way down.
+func exitNodeRouteCmds(action string, exitNodes map[string]models.Peer) []string {
 	var cmds []string
-
-	// Create routing table entries for each exit node.
-	addedTables := make(map[uint]bool)
+	done := make(map[uint]bool)
 	for _, exitNode := range exitNodes {
-		if addedTables[exitNode.RoutingTableID] {
+		if done[exitNode.RoutingTableID] {
 			continue
 		}
 		exitIP := models.FirstIP(exitNode.AllowedIPs)
@@ -163,16 +163,49 @@ func GeneratePostUpCommands(cfg models.AppConfig, gateways []models.GatewayNet) 
 			continue
 		}
 		if exitNode.ExitNodeAllowAll {
-			cmds = append(cmds, fmt.Sprintf("ip route replace default via %s dev wg0 table %d", exitIP, exitNode.RoutingTableID))
+			cmds = append(cmds, fmt.Sprintf("ip route %s default via %s dev wg0 table %d", action, exitIP, exitNode.RoutingTableID))
 		} else {
 			for _, route := range exitNode.ExitNodeRoutes {
 				if route != "" {
-					cmds = append(cmds, fmt.Sprintf("ip route replace %s via %s dev wg0 table %d", route, exitIP, exitNode.RoutingTableID))
+					cmds = append(cmds, fmt.Sprintf("ip route %s %s via %s dev wg0 table %d", action, route, exitIP, exitNode.RoutingTableID))
 				}
 			}
 		}
-		addedTables[exitNode.RoutingTableID] = true
+		done[exitNode.RoutingTableID] = true
 	}
+	return cmds
+}
+
+// policyRouteCmds renders the routes populating each peer's own policy table.
+func policyRouteCmds(action string, cfg models.AppConfig, gateways []models.GatewayNet) []string {
+	var cmds []string
+	for _, p := range cfg.Peers {
+		if !p.Enabled || len(p.PolicyRoutes) == 0 || p.PolicyRoutingTableID == 0 {
+			continue
+		}
+		if models.FirstIP(p.AllowedIPs) == "" {
+			continue
+		}
+
+		for _, routeStr := range p.PolicyRoutes {
+			parts := strings.Split(routeStr, " via ")
+			if len(parts) == 2 {
+				cmds = append(cmds, policyRouteCmd(action, strings.TrimSpace(parts[0]), strings.TrimSpace(parts[1]), p.PolicyRoutingTableID, gateways))
+			}
+		}
+	}
+	return cmds
+}
+
+// GeneratePostUpCommands returns ip rule/route commands for wg0.conf PostUp.
+// Order: first create routing tables for exit nodes, then add rules for peers.
+// gateways are the on-link networks policy route gateways may point into.
+func GeneratePostUpCommands(cfg models.AppConfig, gateways []models.GatewayNet) []string {
+	exitNodes := enabledExitNodes(cfg)
+
+	// No early return when there are no exit nodes: custom policy routes are
+	// independent of them and must still be emitted.
+	cmds := exitNodeRouteCmds("replace", exitNodes)
 
 	// NAT for anything leaving over ZeroTier.
 	cmds = append(cmds, zeroTierMasquerade(cfg, true)...)
@@ -190,23 +223,7 @@ func GeneratePostUpCommands(cfg models.AppConfig, gateways []models.GatewayNet) 
 	}
 
 	// Add the routes that populate each peer's own policy table.
-	for _, p := range cfg.Peers {
-		if !p.Enabled || len(p.PolicyRoutes) == 0 || p.PolicyRoutingTableID == 0 {
-			continue
-		}
-		if models.FirstIP(p.AllowedIPs) == "" {
-			continue
-		}
-
-		for _, routeStr := range p.PolicyRoutes {
-			parts := strings.Split(routeStr, " via ")
-			if len(parts) == 2 {
-				cmds = append(cmds, policyRouteCmd("replace", strings.TrimSpace(parts[0]), strings.TrimSpace(parts[1]), p.PolicyRoutingTableID, gateways))
-			}
-		}
-	}
-
-	return cmds
+	return append(cmds, policyRouteCmds("replace", cfg, gateways)...)
 }
 
 // Apply runs generated PostUp commands against the live system.
@@ -232,18 +249,11 @@ func Apply(cmds []string) error {
 // GeneratePostDownCommands returns cleanup commands for wg0.conf PostDown.
 // Order: first remove rules, then remove routing tables (reverse of PostUp).
 func GeneratePostDownCommands(cfg models.AppConfig, gateways []models.GatewayNet) []string {
-	exitNodes := make(map[string]models.Peer)
-	for _, p := range cfg.Peers {
-		if p.IsExitNode && p.Enabled && p.RoutingTableID > 0 {
-			exitNodes[p.ID] = p
-		}
-	}
+	exitNodes := enabledExitNodes(cfg)
 
 	// No early return when there are no exit nodes: custom policy routes are
 	// independent of them and must still be emitted.
-	var cmds []string
-
-	cmds = append(cmds, zeroTierMasquerade(cfg, false)...)
+	cmds := zeroTierMasquerade(cfg, false)
 
 	// Remove policy rules first. Deleting by priority is exact, so repeated
 	// apply cycles cannot leave duplicates behind.
@@ -252,43 +262,8 @@ func GeneratePostDownCommands(cfg models.AppConfig, gateways []models.GatewayNet
 	}
 
 	// Remove routing tables.
-	removedTables := make(map[uint]bool)
-	for _, exitNode := range exitNodes {
-		if removedTables[exitNode.RoutingTableID] {
-			continue
-		}
-		exitIP := models.FirstIP(exitNode.AllowedIPs)
-		if exitIP == "" {
-			continue
-		}
-		if exitNode.ExitNodeAllowAll {
-			cmds = append(cmds, fmt.Sprintf("ip route del default via %s dev wg0 table %d", exitIP, exitNode.RoutingTableID))
-		} else {
-			for _, route := range exitNode.ExitNodeRoutes {
-				if route != "" {
-					cmds = append(cmds, fmt.Sprintf("ip route del %s via %s dev wg0 table %d", route, exitIP, exitNode.RoutingTableID))
-				}
-			}
-		}
-		removedTables[exitNode.RoutingTableID] = true
-	}
+	cmds = append(cmds, exitNodeRouteCmds("del", exitNodes)...)
 
 	// Remove the routes from each peer's own policy table.
-	for _, p := range cfg.Peers {
-		if !p.Enabled || len(p.PolicyRoutes) == 0 || p.PolicyRoutingTableID == 0 {
-			continue
-		}
-		if models.FirstIP(p.AllowedIPs) == "" {
-			continue
-		}
-
-		for _, routeStr := range p.PolicyRoutes {
-			parts := strings.Split(routeStr, " via ")
-			if len(parts) == 2 {
-				cmds = append(cmds, policyRouteCmd("del", strings.TrimSpace(parts[0]), strings.TrimSpace(parts[1]), p.PolicyRoutingTableID, gateways))
-			}
-		}
-	}
-
-	return cmds
+	return append(cmds, policyRouteCmds("del", cfg, gateways)...)
 }

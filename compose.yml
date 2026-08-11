@@ -22,9 +22,5 @@ services:
     volumes:
       - $PWD/data:/app/data # config.yaml persistence
       - /lib/modules:/lib/modules:ro # kernel modules for wireguard
-    environment:
-      - WG_BUSY_LISTEN=:8080
-      - WG_BUSY_CONFIG=/app/data/config.yaml
-      - WG_BUSY_WG_CONFIG=/etc/wireguard/wg0.conf
-      - WG_BUSY_ZT_DATA=/app/data/zerotier
+    # Paths and ports come from the image's CMD flags; the app reads no env vars.
     restart: unless-stopped

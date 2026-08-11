@@ -458,32 +458,6 @@ func (p *Peer) Validate(gateways []GatewayNet) ValidationErrors {
 	return errs
 }
 
-// ValidateExitNodeRefs validates exit node references against the full peer list.
-// This is called separately since it requires cross-peer validation.
-func ValidateExitNodeRefs(peers []Peer) ValidationErrors {
-	var errs ValidationErrors
-
-	exitNodes := make(map[string]bool)
-	for _, p := range peers {
-		if p.IsExitNode && p.Enabled {
-			exitNodes[p.ID] = true
-		}
-	}
-
-	for _, p := range peers {
-		if p.ExitNodeID != "" {
-			if !exitNodes[p.ExitNodeID] {
-				errs = append(errs, ValidationError{
-					Field:   fmt.Sprintf("peers[%s].exitNodeID", p.ID),
-					Message: fmt.Sprintf("references non-existent or disabled exit node %q", p.ExitNodeID),
-				})
-			}
-		}
-	}
-
-	return errs
-}
-
 // CascadeClearExitNode removes all references to the given exit node peer ID.
 func CascadeClearExitNode(peers []Peer, exitNodeID string) {
 	for i := range peers {

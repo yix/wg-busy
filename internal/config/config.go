@@ -139,13 +139,6 @@ func (s *Store) Write(fn func(cfg *models.AppConfig) error) error {
 	return nil
 }
 
-// RenderWGConfig renders and writes wg0.conf from current config (public, for initial render).
-func (s *Store) RenderWGConfig() error {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	return s.renderWGConfig()
-}
-
 // ReapplyRouting re-renders wg0.conf and converges the live routing state to it.
 // Called when a ZeroTier network comes up after wg0, whose routes and NAT rule
 // would otherwise sit uninstalled until the next manual apply.

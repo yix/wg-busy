@@ -411,10 +411,6 @@ services:
     volumes:
       - ./data:/app/data                    # config.yaml persistence
       - /lib/modules:/lib/modules:ro        # kernel modules for wireguard
-    environment:
-      - WG_BUSY_LISTEN=:8080
-      - WG_BUSY_CONFIG=/app/data/config.yaml
-      - WG_BUSY_WG_CONFIG=/etc/wireguard/wg0.conf
     restart: unless-stopped
 ```
 

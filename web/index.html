@@ -7,9 +7,6 @@
     <title>WG Busy - WireGuard Manager</title>
     <link rel="stylesheet" href="index.css">
     <script src="https://unpkg.com/htmx.org@2.0.4"></script>
-    <script src="https://unpkg.com/htmx-ext-client-side-templates@2.0.0/client-side-templates.js"></script>
-    <script src="https://unpkg.com/handlebars@4.7.8/dist/handlebars.min.js"></script>
-
 </head>
 
 <body>
@@ -34,43 +31,8 @@
             </button>
         </hgroup>
 
-        <div id="stats-bar" class="stats-bar" hx-ext="client-side-templates" handlebars-template="stats-template"
-            hx-get="stats" hx-trigger="load, every 2s" hx-swap="innerHTML">
+        <div id="stats-bar" class="stats-bar" hx-get="stats" hx-trigger="load, every 2s" hx-swap="innerHTML">
         </div>
-
-        <template id="stats-template">
-            <div class="stats-bar-inner">
-                <span class="stats-status">
-                    {{#if server.isUp}}
-                    <span class="status-dot status-up"></span> wg0 up {{server.uptime}}
-                    {{else}}
-                    <span class="status-dot status-down"></span> wg0 down
-                    {{/if}}
-                </span>
-                <span class="stats-transfer">
-                    <span class="stats-rx">&uarr; {{server.currentRxPS}} <small
-                            class="text-muted">({{server.totalRx}})</small></span>
-                    <span class="stats-tx">&darr; {{server.currentTxPS}} <small
-                            class="text-muted">({{server.totalTx}})</small></span>
-                </span>
-                <span class="stats-sparkline">{{{server.sparklineSVG}}}</span>
-            </div>
-
-            {{#each peers}}
-            <small id="peer-stats-{{id}}" hx-swap-oob="true">
-                {{allowedIPs}}
-                {{#if hasStats}}
-                &middot; <span class="stats-rx">&uarr;{{currentRxPS}} <small
-                        class="text-muted">({{transferRx}})</small></span> <span class="stats-tx">&darr;{{currentTxPS}}
-                    <small class="text-muted">({{transferTx}})</small></span> &middot; shake
-                {{handshake}}
-                <span class="peer-sparkline">{{{sparklineSVG}}}</span>
-                {{else}}
-                &middot; Created {{createdAt}}
-                {{/if}}
-            </small>
-            {{/each}}
-        </template>
 
         <div class="tabs" role="tablist">
             <button role="tab" class="active" hx-get="peers" hx-target="#tab-content" hx-swap="innerHTML"

@@ -4,7 +4,6 @@ go 1.23.0
 
 require (
 	github.com/bio-routing/bio-rd v0.1.11-0.20251205193826-93cebc7c8782
-	github.com/google/uuid v1.6.0
 	github.com/skip2/go-qrcode v0.0.0-20200617195104-da1b6568686e
 	golang.zx2c4.com/wireguard/wgctrl v0.0.0-20241231184526-a9ab2273dd10
 	gopkg.in/yaml.v3 v3.0.1

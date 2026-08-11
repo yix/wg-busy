@@ -1,13 +1,13 @@
 package handlers
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
 	"time"
-
-	"github.com/google/uuid"
 
 	"github.com/yix/wg-busy/internal/ipam"
 	"github.com/yix/wg-busy/internal/models"
@@ -167,50 +167,21 @@ func (h *handler) CreatePeer(w http.ResponseWriter, r *http.Request) {
 	}
 
 	exitNodeAllowAll := r.FormValue("exitNodeAllowAll") == "on"
-	var exitNodeRoutes []string
-	if routesStr := strings.TrimSpace(r.FormValue("exitNodeRoutes")); routesStr != "" {
-		for _, line := range strings.Split(routesStr, "\n") {
-			parts := strings.Split(line, ",")
-			for _, p := range parts {
-				p = strings.TrimSpace(p)
-				if p != "" {
-					exitNodeRoutes = append(exitNodeRoutes, p)
-				}
-			}
-		}
-	}
-
-	var advertisedRoutes []string
-	if routesStr := strings.TrimSpace(r.FormValue("advertisedRoutes")); routesStr != "" {
-		for _, line := range strings.Split(routesStr, "\n") {
-			parts := strings.Split(line, ",")
-			for _, p := range parts {
-				p = strings.TrimSpace(p)
-				if p != "" {
-					advertisedRoutes = append(advertisedRoutes, p)
-				}
-			}
-		}
-	}
-
-	var policyRoutes []string
-	if routesStr := strings.TrimSpace(r.FormValue("policyRoutes")); routesStr != "" {
-		for _, line := range strings.Split(routesStr, "\n") {
-			parts := strings.Split(line, ",")
-			for _, p := range parts {
-				p = strings.TrimSpace(p)
-				if p != "" {
-					policyRoutes = append(policyRoutes, p)
-				}
-			}
-		}
-	}
+	exitNodeRoutes := parseRouteList(r.FormValue("exitNodeRoutes"))
+	advertisedRoutes := parseRouteList(r.FormValue("advertisedRoutes"))
+	policyRoutes := parseRouteList(r.FormValue("policyRoutes"))
 
 	bgpEnabled, bgpConnect, bgpPeerIP, bgpPeerPort, bgpPeerASN, bgpRouteFilters := parsePeerBGPForm(r)
 
+	id, err := newPeerID()
+	if err != nil {
+		http.Error(w, fmt.Sprintf("ID generation failed: %v", err), http.StatusInternalServerError)
+		return
+	}
+
 	now := time.Now().UTC()
 	peer := models.Peer{
-		ID:                  uuid.New().String(),
+		ID:                  id,
 		Name:                strings.TrimSpace(r.FormValue("name")),
 		PrivateKey:          privKey,
 		PublicKey:           pubKey,
@@ -273,29 +244,7 @@ func (h *handler) CreatePeer(w http.ResponseWriter, r *http.Request) {
 
 	if writeErr != nil {
 		logRejected(r, writeErr)
-		if ve, ok := writeErr.(models.ValidationErrors); ok {
-			data := peerFormData{
-				IsNew:            true,
-				Peer:             peer,
-				ValidationErrors: ve,
-			}
-			h.store.Read(func(cfg *models.AppConfig) {
-				data.ExitNodes = models.ExitNodePeers(cfg.Peers)
-				data.Gateways = models.GatewayNets(cfg.Server.Address, h.ztGatewayNets())
-			})
-			w.Header().Set("Content-Type", "text/html; charset=utf-8")
-			w.WriteHeader(http.StatusUnprocessableEntity)
-			_ = templates.ExecuteTemplate(w, "peer-form", data)
-			return
-		}
-		data := peerFormData{IsNew: true, Peer: peer, Error: writeErr.Error()}
-		h.store.Read(func(cfg *models.AppConfig) {
-			data.ExitNodes = models.ExitNodePeers(cfg.Peers)
-			data.Gateways = models.GatewayNets(cfg.Server.Address, h.ztGatewayNets())
-		})
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		w.WriteHeader(http.StatusUnprocessableEntity)
-		_ = templates.ExecuteTemplate(w, "peer-form", data)
+		h.renderPeerFormError(w, peerFormData{IsNew: true, Peer: peer}, writeErr)
 		return
 	}
 
@@ -321,44 +270,9 @@ func (h *handler) UpdatePeer(w http.ResponseWriter, r *http.Request) {
 	}
 
 	exitNodeAllowAll := r.FormValue("exitNodeAllowAll") == "on"
-	var exitNodeRoutes []string
-	if routesStr := strings.TrimSpace(r.FormValue("exitNodeRoutes")); routesStr != "" {
-		for _, line := range strings.Split(routesStr, "\n") {
-			parts := strings.Split(line, ",")
-			for _, p := range parts {
-				p = strings.TrimSpace(p)
-				if p != "" {
-					exitNodeRoutes = append(exitNodeRoutes, p)
-				}
-			}
-		}
-	}
-
-	var advertisedRoutes []string
-	if routesStr := strings.TrimSpace(r.FormValue("advertisedRoutes")); routesStr != "" {
-		for _, line := range strings.Split(routesStr, "\n") {
-			parts := strings.Split(line, ",")
-			for _, p := range parts {
-				p = strings.TrimSpace(p)
-				if p != "" {
-					advertisedRoutes = append(advertisedRoutes, p)
-				}
-			}
-		}
-	}
-
-	var policyRoutes []string
-	if routesStr := strings.TrimSpace(r.FormValue("policyRoutes")); routesStr != "" {
-		for _, line := range strings.Split(routesStr, "\n") {
-			parts := strings.Split(line, ",")
-			for _, p := range parts {
-				p = strings.TrimSpace(p)
-				if p != "" {
-					policyRoutes = append(policyRoutes, p)
-				}
-			}
-		}
-	}
+	exitNodeRoutes := parseRouteList(r.FormValue("exitNodeRoutes"))
+	advertisedRoutes := parseRouteList(r.FormValue("advertisedRoutes"))
+	policyRoutes := parseRouteList(r.FormValue("policyRoutes"))
 
 	bgpEnabled, bgpConnect, bgpPeerIP, bgpPeerPort, bgpPeerASN, bgpRouteFilters := parsePeerBGPForm(r)
 
@@ -427,18 +341,11 @@ func (h *handler) UpdatePeer(w http.ResponseWriter, r *http.Request) {
 
 	if writeErr != nil {
 		logRejected(r, writeErr)
-		if ve, ok := writeErr.(models.ValidationErrors); ok {
-			data := peerFormData{Peer: submitted, ValidationErrors: ve}
-			h.store.Read(func(cfg *models.AppConfig) {
-				data.ExitNodes = models.ExitNodePeers(cfg.Peers)
-				data.Gateways = models.GatewayNets(cfg.Server.Address, h.ztGatewayNets())
-			})
-			w.Header().Set("Content-Type", "text/html; charset=utf-8")
-			w.WriteHeader(http.StatusUnprocessableEntity)
-			_ = templates.ExecuteTemplate(w, "peer-form", data)
+		if _, ok := writeErr.(models.ValidationErrors); !ok {
+			http.Error(w, writeErr.Error(), http.StatusInternalServerError)
 			return
 		}
-		http.Error(w, writeErr.Error(), http.StatusInternalServerError)
+		h.renderPeerFormError(w, peerFormData{Peer: submitted}, writeErr)
 		return
 	}
 
@@ -566,6 +473,46 @@ func (h *handler) RegeneratePeerKeys(w http.ResponseWriter, r *http.Request) {
 	// Return the edit form with updated data.
 	h.GetPeerForm(w, r)
 }
+
+// renderPeerFormError re-renders the form with the rejected input still in it.
+// Validation errors are listed per field; anything else is shown as one message.
+func (h *handler) renderPeerFormError(w http.ResponseWriter, data peerFormData, writeErr error) {
+	if ve, ok := writeErr.(models.ValidationErrors); ok {
+		data.ValidationErrors = ve
+	} else {
+		data.Error = writeErr.Error()
+	}
+	h.store.Read(func(cfg *models.AppConfig) {
+		data.ExitNodes = models.ExitNodePeers(cfg.Peers)
+		data.Gateways = models.GatewayNets(cfg.Server.Address, h.ztGatewayNets())
+	})
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.WriteHeader(http.StatusUnprocessableEntity)
+	_ = templates.ExecuteTemplate(w, "peer-form", data)
+}
+
+// newPeerID returns a random opaque ID for a new peer.
+func newPeerID() (string, error) {
+	var b [16]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(b[:]), nil
+}
+
+// parseRouteList splits a routes textarea into entries. Browsers submit CRLF,
+// and the fields accept commas as well as newlines — but never spaces: a policy
+// route is "CIDR via IP".
+func parseRouteList(s string) []string {
+	var out []string
+	for _, f := range strings.FieldsFunc(s, func(r rune) bool { return r == '\n' || r == '\r' || r == ',' }) {
+		if f = strings.TrimSpace(f); f != "" {
+			out = append(out, f)
+		}
+	}
+	return out
+}
+
 func (h *handler) listPeersOOB(w http.ResponseWriter, r *http.Request) {
 	data := h.buildPeersListData()
 	data.OOB = true

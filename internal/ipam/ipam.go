@@ -1,8 +1,8 @@
 package ipam
 
 import (
+	"encoding/binary"
 	"fmt"
-	"math/big"
 	"net"
 )
 
@@ -51,12 +51,9 @@ func nextIP(ip net.IP) net.IP {
 	if ip4 == nil {
 		return nil
 	}
-	i := big.NewInt(0).SetBytes(ip4)
-	i.Add(i, big.NewInt(1))
-	b := i.Bytes()
-	result := make(net.IP, 4)
-	copy(result[4-len(b):], b)
-	return result
+	next := make(net.IP, 4)
+	binary.BigEndian.PutUint32(next, binary.BigEndian.Uint32(ip4)+1)
+	return next
 }
 
 func broadcastAddress(n *net.IPNet) net.IP {

@@ -49,8 +49,8 @@ type Collector struct {
 	mu          sync.RWMutex
 	startedAt   time.Time
 	iface       InterfaceStats
-	peers       map[string]*PeerStats    // keyed by public key
-	history     []HistoryPoint           // ring buffer
+	peers       map[string]*PeerStats     // keyed by public key
+	history     []HistoryPoint            // ring buffer
 	peerHistory map[string][]HistoryPoint // per-peer ring buffer
 	prevRx      int64
 	prevTx      int64
@@ -58,7 +58,6 @@ type Collector struct {
 	prevPeerTx  map[string]int64
 	prevTime    time.Time
 	isUp        bool
-	stopCh      chan struct{}
 }
 
 // NewCollector creates a new stats collector.
@@ -68,7 +67,6 @@ func NewCollector() *Collector {
 		peerHistory: make(map[string][]HistoryPoint),
 		prevPeerRx:  make(map[string]int64),
 		prevPeerTx:  make(map[string]int64),
-		stopCh:      make(chan struct{}),
 	}
 }
 
@@ -79,11 +77,6 @@ func (c *Collector) Start(startedAt time.Time) {
 	c.mu.Unlock()
 
 	go c.pollLoop()
-}
-
-// Stop halts the background polling goroutine.
-func (c *Collector) Stop() {
-	close(c.stopCh)
 }
 
 // SetStartedAt updates the WireGuard start time (e.g., after apply/restart).
@@ -168,13 +161,9 @@ func (c *Collector) pollLoop() {
 	// Do an initial poll immediately.
 	c.poll()
 
-	for {
-		select {
-		case <-ticker.C:
-			c.poll()
-		case <-c.stopCh:
-			return
-		}
+	// ponytail: no stop channel — the collector lives as long as the process.
+	for range ticker.C {
+		c.poll()
 	}
 }
 
