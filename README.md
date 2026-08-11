@@ -184,6 +184,11 @@ A dedicated dashboard for BGP sessions showing realtime stats on peer uptimes, r
 
 ![BGP Statistics](docs/wg-busy-3-bgp.jpg)
 
+### ZeroTier Management
+Run the managed ZeroTier client, join networks, inspect service and network status, and troubleshoot networks that have not joined.
+
+![ZeroTier Management](docs/wg-busy-4-zerotier.jpg)
+
 ## License
 
 MIT
