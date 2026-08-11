@@ -36,7 +36,10 @@ type zerotierData struct {
 	Networks []ztNetworkRow
 	Peers    []ztPeerRow
 	// Addresses are this node's own ZeroTier IPs across all joined networks.
-	Addresses        []string
+	Addresses []string
+	// Pending are networks in the config the daemon has not joined, so a network
+	// that never took effect is visible instead of just missing from the list.
+	Pending          []models.ZeroTierNetwork
 	Uptime           string
 	Success          string
 	Error            string
@@ -72,6 +75,21 @@ func (h *handler) buildZeroTierData() zerotierData {
 		}
 		data.Networks = append(data.Networks, row)
 		data.Addresses = append(data.Addresses, n.AssignedAddresses...)
+	}
+
+	// Configured networks the daemon does not report back: the join never took
+	// effect (service degraded, still starting, or the ID does not exist).
+	for _, want := range data.Config.Networks {
+		joined := false
+		for _, n := range snap.Networks {
+			if strings.EqualFold(n.ID, want.ID) {
+				joined = true
+				break
+			}
+		}
+		if !joined {
+			data.Pending = append(data.Pending, want)
+		}
 	}
 
 	for _, p := range snap.Peers {

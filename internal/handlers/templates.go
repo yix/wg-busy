@@ -511,12 +511,23 @@ var templates = template.Must(template.New("").Funcs(template.FuncMap{
 {{if not .Config.Enabled}}
 <article class="toast toast-error">ZeroTier is disabled. Enable it above to start the service.</article>
 {{else}}
+    {{if .Snapshot.ServiceErr}}
+    <div class="toast toast-error" role="alert">
+        <div>
+            <strong>ZeroTier service problem</strong>
+            <div>{{.Snapshot.ServiceErr}}</div>
+            {{if .Snapshot.Hint}}<div><small>{{.Snapshot.Hint}}</small></div>{{end}}
+        </div>
+    </div>
+    {{end}}
     {{if .Snapshot.Err}}<div class="toast toast-error" role="alert">{{.Snapshot.Err}}</div>{{end}}
 
     <div class="grid" style="margin-bottom: 2rem;">
         <article>
             <header><strong>Service</strong></header>
-            {{if .Snapshot.Running}}
+            {{if .Snapshot.ServiceErr}}
+            <span class="status-dot status-down"></span> Running, degraded
+            {{else if .Snapshot.Running}}
             <span class="status-dot status-up"></span> Running {{.Uptime}}
             {{else}}
             <span class="status-dot status-down"></span> Not running
@@ -546,6 +557,18 @@ var templates = template.Must(template.New("").Funcs(template.FuncMap{
             {{else}}&mdash;{{end}}
         </article>
     </div>
+
+    {{if .Pending}}
+    <h4>Not Joined ({{len .Pending}})</h4>
+    {{range .Pending}}
+    <article class="toast toast-error" role="alert">
+        <div>
+            {{if .Name}}{{.Name}} &mdash; {{end}}<code>{{.ID}}</code> is configured but the ZeroTier service has not joined it.
+            <div><small>Check the service problem above, or confirm the network ID exists.</small></div>
+        </div>
+    </article>
+    {{end}}
+    {{end}}
 
     <h4>Joined Networks ({{len .Networks}})</h4>
     {{if not .Networks}}
@@ -577,11 +600,15 @@ var templates = template.Must(template.New("").Funcs(template.FuncMap{
         </p>
 
         <p>
-            {{if .PortDeviceName}}
+            {{if and .PortDeviceName (not .PortError)}}
             <span class="stats-rx">&darr; {{if .RxPS}}{{.RxPS}} {{end}}<small class="text-muted">({{.Rx}})</small></span>
             <span class="stats-tx">&uarr; {{if .TxPS}}{{.TxPS}} {{end}}<small class="text-muted">({{.Tx}})</small></span>
+            {{else if .PortError}}
+            <small class="field-error">No network interface: ZeroTier could not create <code>{{.PortDeviceName}}</code> (port error {{.PortError}}). Traffic cannot flow over this network.</small>
+            {{else if eq .Status "ACCESS_DENIED"}}
+            <small class="field-error">Not authorized &mdash; approve this node in ZeroTier Central to get an address.</small>
             {{else}}
-            <small class="text-muted">No interface yet &mdash; traffic counters appear once the network is authorized.</small>
+            <small class="text-muted">No interface yet &mdash; waiting for the network configuration.</small>
             {{end}}
         </p>
 

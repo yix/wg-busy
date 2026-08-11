@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -46,7 +47,21 @@ type Snapshot struct {
 	Peers    []Peer
 	Err      string
 	Uptime   time.Duration
+
+	// ServiceErr is the last error the daemon itself reported on its output. It
+	// survives across ticks: the daemon keeps running after failures like a
+	// missing TUN device, so nothing else would tell the user why it does nothing.
+	ServiceErr string
+	// Hint is an actionable remediation for ServiceErr when we can infer one.
+	Hint string
 }
+
+// tunDevice is what ZeroTier needs to create network interfaces. Without it the
+// daemon starts and answers its API, but every network stays in PORT_ERROR.
+const tunDevice = "/dev/net/tun"
+
+// tunHint is the remediation shown when the TUN device is missing.
+const tunHint = "The container cannot access " + tunDevice + ". Add `devices: [/dev/net/tun:/dev/net/tun]` to compose.yml (or `--device /dev/net/tun` to docker run) and restart the container."
 
 type counter struct {
 	rx, tx int64
@@ -81,6 +96,9 @@ type Supervisor struct {
 	startedAt   time.Time
 	lastStart   time.Time
 
+	serviceErr string // last error line the daemon printed
+	hint       string // remediation for serviceErr, when we can infer one
+
 	snap  Snapshot
 	prev  map[string]counter // interface name -> previous sample
 	stop  chan struct{}
@@ -95,6 +113,33 @@ func New(homeDir string) *Supervisor {
 		prev:    make(map[string]counter),
 		stop:    make(chan struct{}),
 	}
+}
+
+// serviceLog forwards the daemon's own output into the app log with a [ZT]
+// prefix, and remembers the last error line so the UI can show it. Without this
+// the daemon's failures land in the container log unlabelled and unnoticed.
+type serviceLog struct{ s *Supervisor }
+
+func (l serviceLog) Write(p []byte) (int, error) {
+	// ponytail: assumes the daemon writes whole lines, which it does. A partial
+	// write would only split one log line, never lose it.
+	for _, line := range strings.Split(string(p), "\n") {
+		if line = strings.TrimSpace(line); line == "" {
+			continue
+		}
+		log.Printf("[ZT] %s", line)
+
+		if !strings.Contains(strings.ToUpper(line), "ERROR") {
+			continue
+		}
+		l.s.mu.Lock()
+		l.s.serviceErr = line
+		if strings.Contains(strings.ToUpper(line), "TUN/TAP") {
+			l.s.hint = tunHint
+		}
+		l.s.mu.Unlock()
+	}
+	return len(p), nil
 }
 
 // OnGatewaysChanged registers a callback fired when the ZeroTier on-link
@@ -141,6 +186,13 @@ func (s *Supervisor) Configure(cfg *models.AppConfig) {
 func (s *Supervisor) setSnapshot(snap Snapshot) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+
+	// The daemon keeps running after errors like a missing TUN device, so its
+	// last complaint has to persist across ticks or it would never be seen.
+	if snap.Enabled {
+		snap.ServiceErr, snap.Hint = s.serviceErr, s.hint
+	}
+
 	if snap.Err != s.snap.Err {
 		switch {
 		case snap.Err != "":
@@ -301,9 +353,21 @@ func (s *Supervisor) ensureRunning(desired models.ZeroTierConfig) error {
 		return fmt.Errorf("creating ZeroTier home %s: %w", s.homeDir, err)
 	}
 
+	// Preflight: without the TUN device the daemon starts and serves its API but
+	// can never create an interface, so say so up front instead of leaving the
+	// user with a "Running" service that does nothing.
+	s.serviceErr, s.hint = "", ""
+	if runtime.GOOS == "linux" {
+		if _, err := os.Stat(tunDevice); err != nil {
+			s.serviceErr = "ZeroTier cannot create network interfaces: " + tunDevice + " is not available."
+			s.hint = tunHint
+			log.Printf("[ZT] %s %s", s.serviceErr, s.hint)
+		}
+	}
+
 	cmd := exec.Command("zerotier-one", "-p"+strconv.Itoa(int(port)), s.homeDir)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
+	cmd.Stdout = serviceLog{s}
+	cmd.Stderr = serviceLog{s}
 	s.lastStart = time.Now()
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("starting zerotier-one: %w", err)
@@ -348,6 +412,8 @@ func (s *Supervisor) stopService() {
 func (s *Supervisor) clearProcess() {
 	s.cmd = nil
 	s.exited = false
+	s.serviceErr = ""
+	s.hint = ""
 	s.client = nil
 	s.runningPort = 0
 	s.startedAt = time.Time{}

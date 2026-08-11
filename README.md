@@ -154,6 +154,7 @@ reconciled toward it.
 - **Traffic**: Per-network totals and live rates, read from the interface counters of each `zt*` device. ZeroTier's local API exposes no byte counters, so traffic is per interface, not per peer.
 - **Peers**: Address, role, version, latency, and the active physical paths (or `relayed` when no direct path exists).
 - **State**: Node identity, auth token and joined networks persist in `/app/data/zerotier`, so the node keeps its address across restarts. Requires `/dev/net/tun` and `NET_ADMIN`.
+- **Failure Reporting**: The daemon's own output is logged with a `[ZT]` prefix, and its errors are shown in the tab with a remediation hint. A missing `/dev/net/tun` — where ZeroTier keeps running but can never create an interface — is detected up front and reported as "Running, degraded" rather than failing silently. Configured networks the service has not joined are listed separately under **Not Joined**.
 
 Members still need to be authorized in ZeroTier Central (or your own controller) before a network
 leaves `ACCESS_DENIED` and gets an address.
