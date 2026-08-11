@@ -38,7 +38,10 @@ type peersListData struct {
 
 // peerFormData is the template data for the peer create/edit form.
 type peerFormData struct {
-	IsNew            bool
+	IsNew bool
+	// Defaults renders a blank form with default values checked. It is off when
+	// re-rendering after an error, so the user's own input is preserved.
+	Defaults         bool
 	Peer             models.Peer
 	ExitNodes        []models.Peer
 	Error            string
@@ -106,7 +109,7 @@ func (h *handler) GetPeerForm(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	isNew := id == ""
 
-	data := peerFormData{IsNew: isNew}
+	data := peerFormData{IsNew: isNew, Defaults: isNew}
 
 	h.store.Read(func(cfg *models.AppConfig) {
 		if !isNew {
@@ -255,7 +258,7 @@ func (h *handler) CreatePeer(w http.ResponseWriter, r *http.Request) {
 		}
 
 		// Validate.
-		if errs := peer.Validate(); len(errs) > 0 {
+		if errs := peer.Validate(cfg.Server.Address); len(errs) > 0 {
 			return errs
 		}
 
@@ -264,6 +267,7 @@ func (h *handler) CreatePeer(w http.ResponseWriter, r *http.Request) {
 	})
 
 	if writeErr != nil {
+		logRejected(r, writeErr)
 		if ve, ok := writeErr.(models.ValidationErrors); ok {
 			data := peerFormData{
 				IsNew:            true,
@@ -351,6 +355,10 @@ func (h *handler) UpdatePeer(w http.ResponseWriter, r *http.Request) {
 
 	bgpEnabled, bgpConnect, bgpPeerIP, bgpPeerPort, bgpPeerASN, bgpRouteFilters := parsePeerBGPForm(r)
 
+	// Holds what the user submitted, so a rejected edit can be shown back to them
+	// (the store rolls its own copy back on error).
+	var submitted models.Peer
+
 	writeErr := h.store.Write(func(cfg *models.AppConfig) error {
 		p := models.FindPeerByID(cfg.Peers, id)
 		if p == nil {
@@ -401,7 +409,8 @@ func (h *handler) UpdatePeer(w http.ResponseWriter, r *http.Request) {
 			models.CascadeClearExitNode(cfg.Peers, id)
 		}
 
-		if errs := p.Validate(); len(errs) > 0 {
+		if errs := p.Validate(cfg.Server.Address); len(errs) > 0 {
+			submitted = *p
 			return errs
 		}
 
@@ -409,13 +418,10 @@ func (h *handler) UpdatePeer(w http.ResponseWriter, r *http.Request) {
 	})
 
 	if writeErr != nil {
+		logRejected(r, writeErr)
 		if ve, ok := writeErr.(models.ValidationErrors); ok {
-			data := peerFormData{ValidationErrors: ve}
+			data := peerFormData{Peer: submitted, ValidationErrors: ve}
 			h.store.Read(func(cfg *models.AppConfig) {
-				p := models.FindPeerByID(cfg.Peers, id)
-				if p != nil {
-					data.Peer = *p
-				}
 				data.ExitNodes = models.ExitNodePeers(cfg.Peers)
 			})
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")

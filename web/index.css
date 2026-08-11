@@ -413,6 +413,35 @@ dialog article {
   align-items: center;
 }
 
+/* Floating toasts for errors that have no form to render into. */
+.toast-container {
+  position: fixed;
+  inset: auto 1rem 1rem auto;
+  z-index: 1000;
+  width: min(28rem, calc(100vw - 2rem));
+  /* reset the UA popover box; only the toasts inside should be visible */
+  margin: 0;
+  padding: 0;
+  border: none;
+  background: transparent;
+  overflow: visible;
+}
+
+.toast-container .toast {
+  box-shadow: var(--box-shadow-lg);
+  white-space: pre-wrap;
+}
+
+.error-list {
+  margin: 0.35rem 0 0;
+  padding-left: 1.2rem;
+  font-weight: 400;
+}
+
+.error-list code {
+  font-size: 0.85em;
+}
+
 .toast-success {
   background: var(--success-bg);
   color: var(--success-text);

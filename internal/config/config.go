@@ -68,15 +68,24 @@ func (s *Store) Write(fn func(cfg *models.AppConfig) error) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	// Roll back on any failure, so a rejected edit never leaves the in-memory
+	// config diverged from disk (it would be persisted by the next successful write).
+	// ponytail: shallow copy is enough — mutations replace slices, never edit elements in place.
+	backup := s.config
+	backup.Peers = append([]models.Peer(nil), s.config.Peers...)
+
 	if err := fn(&s.config); err != nil {
+		s.config = backup
 		return err
 	}
 
 	if err := s.saveYAML(); err != nil {
+		s.config = backup
 		return fmt.Errorf("saving config: %w", err)
 	}
 
 	if err := s.renderWGConfig(); err != nil {
+		s.config = backup
 		return fmt.Errorf("rendering wg config: %w", err)
 	}
 

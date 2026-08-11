@@ -1,8 +1,11 @@
 package handlers
 
 import (
+	"fmt"
 	"io/fs"
+	"log"
 	"net/http"
+	"strings"
 
 	"github.com/yix/wg-busy/internal/config"
 	"github.com/yix/wg-busy/internal/wgstats"
@@ -13,8 +16,52 @@ type handler struct {
 	stats *wgstats.Collector
 }
 
+// logRejected records why a user action was rejected. The middleware logs that a
+// request failed; this logs what was wrong with it.
+func logRejected(r *http.Request, err error) {
+	log.Printf("rejected %s %s from %s: %v", r.Method, r.URL.Path, r.RemoteAddr, err)
+}
+
+// statusRecorder captures the response status, and the body of plain-text error
+// responses (everything http.Error writes), so the middleware can log both.
+type statusRecorder struct {
+	http.ResponseWriter
+	status int
+	detail string
+}
+
+func (s *statusRecorder) WriteHeader(code int) {
+	s.status = code
+	s.ResponseWriter.WriteHeader(code)
+}
+
+func (s *statusRecorder) Write(b []byte) (int, error) {
+	// ponytail: only http.Error bodies are text/plain; HTML error responses carry
+	// their detail via logRejected instead, so we don't log whole rendered forms.
+	if s.status >= 400 && s.detail == "" && strings.HasPrefix(s.Header().Get("Content-Type"), "text/plain") {
+		s.detail = strings.TrimSpace(string(b))
+	}
+	return s.ResponseWriter.Write(b)
+}
+
+// logErrors logs every request that ends in a 4xx or 5xx, so no failed user
+// action is invisible in the app log.
+func logErrors(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		rec := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
+		next.ServeHTTP(rec, r)
+		if rec.status >= 400 {
+			msg := fmt.Sprintf("%d %s %s from %s", rec.status, r.Method, r.URL.Path, r.RemoteAddr)
+			if rec.detail != "" {
+				msg += ": " + rec.detail
+			}
+			log.Print(msg)
+		}
+	})
+}
+
 // NewRouter creates the HTTP mux with all routes registered.
-func NewRouter(store *config.Store, webFS fs.FS, stats *wgstats.Collector) *http.ServeMux {
+func NewRouter(store *config.Store, webFS fs.FS, stats *wgstats.Collector) http.Handler {
 	h := &handler{store: store, stats: stats}
 
 	mux := http.NewServeMux()
@@ -51,5 +98,5 @@ func NewRouter(store *config.Store, webFS fs.FS, stats *wgstats.Collector) *http
 	mux.HandleFunc("POST /api/server/apply", h.ApplyConfig)
 	mux.HandleFunc("POST /api/peers/{id}/regenerate-keys", h.RegeneratePeerKeys)
 
-	return mux
+	return logErrors(mux)
 }

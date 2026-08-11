@@ -19,6 +19,7 @@ RUN mkdir -p /app/data /etc/wireguard
 VOLUME /app/data
 VOLUME /etc/wireguard
 
+EXPOSE 1179/tcp
 EXPOSE 8080
 EXPOSE 51820/udp
 

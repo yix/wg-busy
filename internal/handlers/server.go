@@ -68,31 +68,27 @@ func (h *handler) UpdateServerConfig(w http.ResponseWriter, r *http.Request) {
 			cfg.Server.BGPASN = 64512
 		}
 
+		// Capture what was submitted before validating: the store rolls its copy
+		// back on error, and the form has to show the user their own input.
+		data.Server = cfg.Server
+
 		if errs := cfg.Server.Validate(); len(errs) > 0 {
 			return errs
 		}
 
-		data.Server = cfg.Server
 		return nil
 	})
 
 	if writeErr != nil {
+		logRejected(r, writeErr)
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		if ve, ok := writeErr.(models.ValidationErrors); ok {
 			data.ValidationErrors = ve
-			h.store.Read(func(cfg *models.AppConfig) {
-				data.Server = cfg.Server
-			})
-			w.Header().Set("Content-Type", "text/html; charset=utf-8")
 			w.WriteHeader(http.StatusUnprocessableEntity)
-			_ = templates.ExecuteTemplate(w, "server-config", data)
-			return
+		} else {
+			data.Error = writeErr.Error()
+			w.WriteHeader(http.StatusInternalServerError)
 		}
-		data.Error = writeErr.Error()
-		h.store.Read(func(cfg *models.AppConfig) {
-			data.Server = cfg.Server
-		})
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		w.WriteHeader(http.StatusInternalServerError)
 		_ = templates.ExecuteTemplate(w, "server-config", data)
 		return
 	}

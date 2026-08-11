@@ -24,6 +24,21 @@ var templates = template.Must(template.New("").Funcs(template.FuncMap{
 <div class="toast toast-error" role="alert">{{.}}</div>
 {{end}}
 
+{{/* Summary of every validation error, so errors on fields without their own
+     inline message (or with indexed names) are still shown. */}}
+{{define "error-summary"}}
+{{if .}}
+<div class="toast toast-error" role="alert">
+    <div>
+        <strong>Could not save &mdash; please fix:</strong>
+        <ul class="error-list">
+            {{range .}}<li><code>{{.Field}}</code> {{.Message}}</li>{{end}}
+        </ul>
+    </div>
+</div>
+{{end}}
+{{end}}
+
 {{define "peers-list"}}
 <div id="peers-list" {{if .OOB}}hx-swap-oob="true"{{end}}>
     <div class="header-row">
@@ -111,10 +126,10 @@ var templates = template.Must(template.New("").Funcs(template.FuncMap{
             <button aria-label="Close" class="btn btn-outline secondary mb-0" style="padding: 0.1rem 0.6rem" onclick="closeModal()">X</button>
         </header>
         <form {{if .IsNew}}hx-post="peers"{{else}}hx-put="peers/{{.Peer.ID}}"{{end}}
-              hx-target="#modal-container" hx-swap="innerHTML"
-              onsubmit="validatePeerForm(event)">
+              hx-target="#modal-container" hx-swap="innerHTML">
 
-            {{if .Error}}<div class="toast toast-error">{{.Error}}</div>{{end}}
+            {{if .Error}}<div class="toast toast-error" role="alert">{{.Error}}</div>{{end}}
+            {{template "error-summary" .ValidationErrors}}
 
             <label>
                 Name *
@@ -179,11 +194,11 @@ var templates = template.Must(template.New("").Funcs(template.FuncMap{
 
             <fieldset>
                 <label>
-                    <input type="checkbox" name="presharedKey" {{if or .IsNew .Peer.PresharedKey}}checked{{end}}>
+                    <input type="checkbox" name="presharedKey" {{if or .Defaults .Peer.PresharedKey}}checked{{end}}>
                     {{if .IsNew}}Generate preshared key{{else}}Has preshared key{{end}}
                 </label>
                 <label>
-                    <input type="checkbox" name="enabled" {{if or .IsNew .Peer.Enabled}}checked{{end}}>
+                    <input type="checkbox" name="enabled" {{if or .Defaults .Peer.Enabled}}checked{{end}}>
                     Enabled
                 </label>
             </fieldset>
@@ -200,13 +215,13 @@ var templates = template.Must(template.New("").Funcs(template.FuncMap{
                 <fieldset>
                     <legend>Exit Node Configuration</legend>
                     <label>
-                        <input type="checkbox" name="exitNodeAllowAll" 
-                               {{if or (not .Peer.ID) .Peer.ExitNodeAllowAll}}checked{{end}}
+                        <input type="checkbox" name="exitNodeAllowAll"
+                               {{if or .Defaults .Peer.ExitNodeAllowAll}}checked{{end}}
                                onchange="toggleExitNodeRoutes(this)">
                         Route all traffic via this node (0.0.0.0/0)
                     </label>
-                    
-                    <div id="exit-node-routes-field" {{if or (not .Peer.ID) .Peer.ExitNodeAllowAll}}style="display:none"{{end}}>
+
+                    <div id="exit-node-routes-field" {{if or .Defaults .Peer.ExitNodeAllowAll}}style="display:none"{{end}}>
                         <label>
                             Specific Routes (CIDRs)
                             <textarea name="exitNodeRoutes" rows="3" 
@@ -305,11 +320,11 @@ var templates = template.Must(template.New("").Funcs(template.FuncMap{
 
     <div id="apply-result"></div>
 
-    {{if .Success}}<div class="toast toast-success">{{.Success}}</div>{{end}}
-    {{if .Error}}<div class="toast toast-error">{{.Error}}</div>{{end}}
+    {{if .Success}}<div class="toast toast-success" role="alert">{{.Success}}</div>{{end}}
+    {{if .Error}}<div class="toast toast-error" role="alert">{{.Error}}</div>{{end}}
+    {{template "error-summary" .ValidationErrors}}
 
-    <form hx-put="server" hx-target="#tab-content" hx-swap="innerHTML"
-          onsubmit="validateServerForm(event)">
+    <form hx-put="server" hx-target="#tab-content" hx-swap="innerHTML">
 
         <div class="grid">
             <label>

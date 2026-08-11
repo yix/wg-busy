@@ -205,7 +205,9 @@ func (s *ServerConfig) Validate() ValidationErrors {
 var nameRegexp = regexp.MustCompile(`^[a-zA-Z0-9 _.\-]+$`)
 
 // Validate checks all fields on Peer and returns all errors found.
-func (p *Peer) Validate() ValidationErrors {
+// serverAddr is the server's Address (CIDR list) and is used to check that
+// policy route gateways are directly reachable over wg0. Pass "" to skip that check.
+func (p *Peer) Validate(serverAddr string) ValidationErrors {
 	var errs ValidationErrors
 
 	if strings.TrimSpace(p.Name) == "" {
@@ -271,6 +273,9 @@ func (p *Peer) Validate() ValidationErrors {
 	}
 
 	if len(p.PolicyRoutes) > 0 {
+		// Policy routes are installed as "ip route add <cidr> via <gw> dev wg0", so the
+		// gateway must sit inside the WireGuard subnet or the kernel rejects the route.
+		serverNets := parseCIDRList(serverAddr)
 		for _, pr := range p.PolicyRoutes {
 			parts := strings.Split(pr, " via ")
 			if len(parts) != 2 {
@@ -280,8 +285,14 @@ func (p *Peer) Validate() ValidationErrors {
 			if _, _, err := net.ParseCIDR(strings.TrimSpace(parts[0])); err != nil {
 				errs = append(errs, ValidationError{Field: "policyRoutes", Message: fmt.Sprintf("invalid CIDR: %s", parts[0])})
 			}
-			if net.ParseIP(strings.TrimSpace(parts[1])) == nil {
+			gw := net.ParseIP(strings.TrimSpace(parts[1]))
+			if gw == nil {
 				errs = append(errs, ValidationError{Field: "policyRoutes", Message: fmt.Sprintf("invalid Gateway IP: %s", parts[1])})
+			} else if len(serverNets) > 0 && !ipInAny(gw, serverNets) {
+				errs = append(errs, ValidationError{
+					Field:   "policyRoutes",
+					Message: fmt.Sprintf("gateway %s is not reachable on wg0: it must be inside the WireGuard subnet (%s)", gw, serverAddr),
+				})
 			}
 		}
 	}
@@ -399,6 +410,26 @@ func isValidCIDRList(s string) bool {
 		}
 	}
 	return true
+}
+
+// parseCIDRList parses a comma-separated CIDR list, skipping unparseable entries.
+func parseCIDRList(s string) []*net.IPNet {
+	var nets []*net.IPNet
+	for _, part := range strings.Split(s, ",") {
+		if _, n, err := net.ParseCIDR(strings.TrimSpace(part)); err == nil {
+			nets = append(nets, n)
+		}
+	}
+	return nets
+}
+
+func ipInAny(ip net.IP, nets []*net.IPNet) bool {
+	for _, n := range nets {
+		if n.Contains(ip) {
+			return true
+		}
+	}
+	return false
 }
 
 var hostnameRegexp = regexp.MustCompile(`^[a-zA-Z0-9]([a-zA-Z0-9\-]*[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9\-]*[a-zA-Z0-9])?)*$`)
