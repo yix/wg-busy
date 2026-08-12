@@ -2,12 +2,12 @@ package main
 
 import (
 	"embed"
+	"errors"
 	"flag"
 	"io/fs"
 	"log"
 	"net/http"
 	"os"
-	"os/exec"
 	"os/signal"
 	"syscall"
 	"time"
@@ -50,17 +50,25 @@ func main() {
 			cfg.Server.PrivateKey = priv
 			return nil
 		}); err != nil {
-			log.Fatalf("initializing server keys: %v", err)
+			var applyErr *config.ApplyError
+			if !errors.As(err, &applyErr) {
+				log.Fatalf("initializing server keys: %v", err)
+			}
 		}
+	}
+	// config.yaml is the source of truth. Always render it before wg-quick so a
+	// recreated container, manual YAML edit, or custom path cannot use stale state.
+	if err := store.RenderWGConfig(); err != nil {
+		log.Fatalf("rendering WireGuard config: %v", err)
 	}
 
 	// Auto-start WireGuard.
 	var wgStartedAt time.Time
 	log.Printf("starting WireGuard interface wg0...")
-	cmd := exec.Command("sh", "-c", "wg-quick down wg0 2>/dev/null; wg-quick up wg0")
-	if output, err := cmd.CombinedOutput(); err != nil {
-		log.Printf("warning: wg-quick up failed (may not be running in Docker): %v\n%s", err, string(output))
+	if err := wireguard.RestartWGConfig(*wgConfigPath); err != nil {
+		log.Printf("warning: wg-quick up failed (may not be running in Docker): %v", err)
 	} else {
+		store.MarkWireGuardRestarted()
 		wgStartedAt = time.Now()
 		log.Printf("WireGuard interface wg0 is up")
 

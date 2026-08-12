@@ -15,6 +15,11 @@ import (
 	"github.com/yix/wg-busy/internal/wireguard"
 )
 
+var (
+	reloadWireGuard = wireguard.ReloadWGConfig
+	configureBGP    = bgp.Configure
+)
+
 // Store holds the in-memory config and manages persistence to YAML + wg0.conf.
 type Store struct {
 	mu           sync.RWMutex
@@ -23,6 +28,11 @@ type Store struct {
 	config       models.AppConfig
 	routingState models.AppConfig
 	routingNets  []models.GatewayNet
+	// wgRestartPending stays set until wg-quick has successfully rebuilt the
+	// interface. syncconf cannot apply wg-quick-owned server fields.
+	wgRestartPending bool
+	wgAppliedServer  models.ServerConfig
+	wgHasApplied     bool
 
 	// onChange is notified after a successful write. It must not block: it runs
 	// while the write lock is held, so anything slow (process control, HTTP)
@@ -89,6 +99,7 @@ func Load(configPath, wgConfigPath string) (*Store, error) {
 			Peers: []models.Peer{},
 		}
 		s.routingState = s.config.Clone()
+		s.wgRestartPending = true
 		return s, nil
 	}
 	if err != nil {
@@ -99,15 +110,18 @@ func Load(configPath, wgConfigPath string) (*Store, error) {
 		return nil, fmt.Errorf("parsing config: %w", err)
 	}
 	s.routingState = s.config.Clone()
+	s.wgRestartPending = true
 
 	return s, nil
 }
 
-// Read executes fn with a read lock, passing the current config.
+// Read executes fn with an independent snapshot of the current config. Callers
+// may safely retain it after the callback returns.
 func (s *Store) Read(fn func(cfg *models.AppConfig)) {
 	s.mu.RLock()
-	defer s.mu.RUnlock()
-	fn(&s.config)
+	snapshot := s.config.Clone()
+	s.mu.RUnlock()
+	fn(&snapshot)
 }
 
 // Write executes fn with a write lock, then saves YAML and renders wg0.conf.
@@ -118,23 +132,32 @@ func (s *Store) Write(fn func(cfg *models.AppConfig) error) error {
 	// Mutations may edit nested slice elements in place, so rollback needs an
 	// independent snapshot rather than a shallow struct copy.
 	backup := s.config.Clone()
+	backupRestartPending := s.wgRestartPending
 
 	if err := fn(&s.config); err != nil {
 		s.config = backup
 		return err
 	}
-	if errs := models.ValidateExitNodeRefs(s.config.Peers); len(errs) > 0 {
+	if s.wgHasApplied {
+		s.wgRestartPending = wireguard.ServerRequiresRestart(s.wgAppliedServer, s.config.Server)
+	} else if wireguard.ServerRequiresRestart(backup.Server, s.config.Server) {
+		s.wgRestartPending = true
+	}
+	if errs := models.ValidateConfig(s.config); len(errs) > 0 {
 		s.config = backup
+		s.wgRestartPending = backupRestartPending
 		return errs
 	}
 
 	if err := s.saveYAML(); err != nil {
 		s.config = backup
+		s.wgRestartPending = backupRestartPending
 		return fmt.Errorf("saving config: %w", err)
 	}
 
 	if err := s.renderWGConfig(); err != nil {
 		s.config = backup
+		s.wgRestartPending = backupRestartPending
 		if rollbackErr := s.saveYAML(); rollbackErr != nil {
 			return errors.Join(fmt.Errorf("rendering wg config: %w", err), fmt.Errorf("restoring YAML config: %w", rollbackErr))
 		}
@@ -143,17 +166,25 @@ func (s *Store) Write(fn func(cfg *models.AppConfig) error) error {
 
 	currentNets := s.gatewayNets()
 	var applyErrs []error
-	running, reloadErr := wireguard.ReloadWGConfig()
+	running, reloadErr := reloadWireGuard(s.wgConfigPath)
 	if reloadErr != nil {
 		applyErrs = append(applyErrs, reloadErr)
-	} else if running {
+	} else if !running {
+		applyErrs = append(applyErrs, wireguard.ErrInterfaceDown)
+	} else if s.wgRestartPending {
+		applyErrs = append(applyErrs, wireguard.ErrRestartNeeded)
+	} else {
 		if err := routing.Reconcile(s.routingState, s.routingNets, s.config, currentNets); err != nil {
 			applyErrs = append(applyErrs, err)
 		} else {
 			s.routingState = s.config.Clone()
 			s.routingNets = append([]models.GatewayNet(nil), currentNets...)
 		}
-		if err := bgp.Configure(&s.config); err != nil {
+	}
+	// Disabling BGP never depends on wg0 and must stop an existing runtime even
+	// while WireGuard is down or waiting for a full restart.
+	if !s.config.Server.BGPEnabled || (running && reloadErr == nil && !s.wgRestartPending) {
+		if err := configureBGP(&s.config); err != nil {
 			applyErrs = append(applyErrs, fmt.Errorf("configuring BGP: %w", err))
 		}
 	}
@@ -173,7 +204,10 @@ func (s *Store) Write(fn func(cfg *models.AppConfig) error) error {
 func (s *Store) ReapplyBGP() error {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	return bgp.Configure(&s.config)
+	if s.wgRestartPending && s.config.Server.BGPEnabled {
+		return wireguard.ErrRestartNeeded
+	}
+	return configureBGP(&s.config)
 }
 
 // ReapplyRouting re-renders wg0.conf and converges the live routing state to it.
@@ -182,6 +216,9 @@ func (s *Store) ReapplyBGP() error {
 func (s *Store) ReapplyRouting() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.wgRestartPending {
+		return wireguard.ErrRestartNeeded
+	}
 
 	if err := s.renderWGConfig(); err != nil {
 		return err
@@ -193,6 +230,33 @@ func (s *Store) ReapplyRouting() error {
 	s.routingState = s.config.Clone()
 	s.routingNets = append([]models.GatewayNet(nil), nets...)
 	return nil
+}
+
+// RenderWGConfig writes the current source-of-truth YAML state to wg0.conf
+// without attempting to touch the live interface. Startup uses this before
+// invoking wg-quick.
+func (s *Store) RenderWGConfig() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if errs := models.ValidateConfig(s.config); len(errs) > 0 {
+		return errs
+	}
+	return s.renderWGConfig()
+}
+
+// WGConfigPath returns the file used for every wg-quick operation.
+func (s *Store) WGConfigPath() string { return s.wgConfigPath }
+
+// MarkWireGuardRestarted records that wg-quick successfully installed the
+// complete current configuration, including fields syncconf cannot apply.
+func (s *Store) MarkWireGuardRestarted() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.wgRestartPending = false
+	s.wgAppliedServer = s.config.Server
+	s.wgHasApplied = true
+	s.routingState = s.config.Clone()
+	s.routingNets = append([]models.GatewayNet(nil), s.gatewayNets()...)
 }
 
 func (s *Store) saveYAML() error {

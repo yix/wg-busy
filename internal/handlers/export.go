@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"os/exec"
 	"strings"
 	"time"
 
@@ -83,15 +82,13 @@ func (h *handler) DownloadServerConfig(w http.ResponseWriter, r *http.Request) {
 func (h *handler) ApplyConfig(w http.ResponseWriter, r *http.Request) {
 	// wg0.conf is already on disk (written on every save).
 	// Just restart the interface.
-	cmd := exec.Command("sh", "-c", "wg-quick down wg0 2>/dev/null; wg-quick up wg0")
-	output, err := cmd.CombinedOutput()
-
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	if err != nil {
-		msg := fmt.Sprintf("Failed to apply config: %v\n%s", err, string(output))
+	if err := wireguard.RestartWGConfig(h.store.WGConfigPath()); err != nil {
+		msg := fmt.Sprintf("Failed to apply config: %v", err)
 		_ = templates.ExecuteTemplate(w, "toast-error", msg)
 		return
 	}
+	h.store.MarkWireGuardRestarted()
 	if err := errors.Join(h.store.ReapplyRouting(), h.store.ReapplyBGP()); err != nil {
 		_ = templates.ExecuteTemplate(w, "toast-error", "WireGuard restarted, but dependent services did not fully apply: "+err.Error())
 		return

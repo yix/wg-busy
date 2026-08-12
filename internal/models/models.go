@@ -493,6 +493,88 @@ func ValidateExitNodeRefs(peers []Peer) ValidationErrors {
 	return errs
 }
 
+// ValidateConfig checks invariants that individual forms cannot enforce because
+// they depend on the complete configuration. Dynamic gateway reachability is
+// intentionally checked by the peer form; here Peer.Validate(nil) still checks
+// every persisted field without rejecting a temporarily unavailable ZeroTier
+// gateway during an unrelated save.
+func ValidateConfig(cfg AppConfig) ValidationErrors {
+	var errs ValidationErrors
+	errs = append(errs, cfg.Server.Validate()...)
+	errs = append(errs, cfg.ZeroTier.Validate()...)
+	for i := range cfg.Peers {
+		errs = append(errs, cfg.Peers[i].Validate(nil)...)
+	}
+	errs = append(errs, ValidateExitNodeRefs(cfg.Peers)...)
+
+	peerIDs := make(map[string]string, len(cfg.Peers))
+	publicKeys := make(map[string]string, len(cfg.Peers))
+	allowedPrefixes := make(map[string]string)
+	bgpPeers := make(map[string]string)
+	for _, p := range cfg.Peers {
+		if previous, ok := peerIDs[p.ID]; ok {
+			errs = append(errs, ValidationError{Field: "id", Message: fmt.Sprintf("peer %q duplicates ID used by %q", p.Name, previous)})
+		} else {
+			peerIDs[p.ID] = p.Name
+		}
+		if previous, ok := publicKeys[p.PublicKey]; ok {
+			errs = append(errs, ValidationError{Field: "publicKey", Message: fmt.Sprintf("peer %q duplicates key used by %q", p.Name, previous)})
+		} else {
+			publicKeys[p.PublicKey] = p.Name
+		}
+		if !p.Enabled {
+			continue
+		}
+
+		for _, prefix := range effectiveAllowedPrefixes(p) {
+			if previous, ok := allowedPrefixes[prefix]; ok {
+				errs = append(errs, ValidationError{
+					Field:   "allowedIPs",
+					Message: fmt.Sprintf("peer %q and %q both claim %s", previous, p.Name, prefix),
+				})
+			} else {
+				allowedPrefixes[prefix] = p.Name
+			}
+		}
+
+		if p.BGPEnabled {
+			if p.BGPPeerPort != 179 {
+				errs = append(errs, ValidationError{Field: "bgpPeerPort", Message: "the embedded BGP engine currently supports peer port 179 only"})
+			}
+			if ip := net.ParseIP(strings.TrimSpace(p.BGPPeerIP)); ip != nil {
+				key := ip.String()
+				if previous, ok := bgpPeers[key]; ok {
+					errs = append(errs, ValidationError{Field: "bgpPeerIP", Message: fmt.Sprintf("peer %q duplicates BGP address used by %q", p.Name, previous)})
+				} else {
+					bgpPeers[key] = p.Name
+				}
+			}
+		}
+	}
+	return errs
+}
+
+func effectiveAllowedPrefixes(p Peer) []string {
+	var values []string
+	if p.IsExitNode && p.ExitNodeAllowAll {
+		values = []string{"0.0.0.0/0", "::/0"}
+	} else {
+		values = append(values, strings.Split(p.AllowedIPs, ",")...)
+		if p.IsExitNode {
+			values = append(values, p.ExitNodeRoutes...)
+		}
+		values = append(values, p.AdvertisedRoutes...)
+	}
+
+	result := make([]string, 0, len(values))
+	for _, value := range values {
+		if _, network, err := net.ParseCIDR(strings.TrimSpace(value)); err == nil {
+			result = append(result, network.String())
+		}
+	}
+	return result
+}
+
 // CascadeClearExitNode removes all references to the given exit node peer ID.
 func CascadeClearExitNode(peers []Peer, exitNodeID string) {
 	for i := range peers {

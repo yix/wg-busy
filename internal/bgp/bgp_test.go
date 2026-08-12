@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/bio-routing/bio-rd/protocols/kernel"
+	"github.com/bio-routing/bio-rd/routingtable/vrf"
 
 	"github.com/yix/wg-busy/internal/models"
 )
@@ -30,6 +31,27 @@ func TestServerStateIncludesEveryRestartSensitiveSetting(t *testing.T) {
 	}
 	if got := stateFor(models.ServerConfig{BGPListenPort: 179}, 1).listenAddress; got != "::" {
 		t.Fatalf("default listen address = %q, want ::", got)
+	}
+}
+
+func TestDesiredPeersRejectsUnsupportedRuntimeIdentity(t *testing.T) {
+	registry := vrf.NewVRFRegistry()
+	defVRF := registry.CreateVRFIfNotExists(vrf.DefaultVRFName, 0)
+	peer := models.Peer{
+		Name: "first", Enabled: true, BGPEnabled: true,
+		BGPPeerIP: "10.0.0.2", BGPPeerPort: 180, BGPPeerASN: 64513,
+	}
+	cfg := &models.AppConfig{Server: models.ServerConfig{BGPASN: 64512}, Peers: []models.Peer{peer}}
+	if _, err := desiredPeers(cfg, defVRF, 1); err == nil {
+		t.Fatal("unsupported BGP peer port was accepted")
+	}
+
+	peer.BGPPeerPort = 179
+	duplicate := peer
+	duplicate.Name = "second"
+	cfg.Peers = []models.Peer{peer, duplicate}
+	if _, err := desiredPeers(cfg, defVRF, 1); err == nil {
+		t.Fatal("duplicate BGP peer IP was accepted")
 	}
 }
 

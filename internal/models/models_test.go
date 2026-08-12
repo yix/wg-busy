@@ -1,6 +1,9 @@
 package models
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 // A policy route becomes "ip route add <cidr> via <gw> dev <iface>", so the
 // gateway must be on-link for an interface we manage — the WireGuard subnet or
@@ -218,3 +221,62 @@ func TestValidateExitNodeRefs(t *testing.T) {
 		t.Fatalf("missing reference errors = %v, want exitNodeID", errs)
 	}
 }
+
+func TestValidateConfigRejectsStrictPeerAfterExitCascade(t *testing.T) {
+	exit := validPeer()
+	exit.ID, exit.Name, exit.PublicKey = "exit", "exit", testKey("B")
+	exit.AllowedIPs = "10.0.0.6/32"
+	exit.Enabled, exit.IsExitNode = true, true
+	client := validPeer()
+	client.ID, client.Name, client.PublicKey = "client", "client", testKey("C")
+	client.Enabled, client.ExitNodeID, client.StrictPolicyRouting = true, exit.ID, true
+	cfg := validConfig(exit, client)
+	if errs := ValidateConfig(cfg); len(errs) > 0 {
+		t.Fatalf("valid config rejected: %v", errs)
+	}
+
+	CascadeClearExitNode(cfg.Peers, exit.ID)
+	if errs := ValidateConfig(cfg); !errs.HasField("strictPolicyRouting") {
+		t.Fatalf("cascaded strict peer errors = %v, want strictPolicyRouting", errs)
+	}
+}
+
+func TestValidateConfigRejectsRuntimePeerCollisions(t *testing.T) {
+	t.Run("full exit nodes", func(t *testing.T) {
+		first := validPeer()
+		first.ID, first.Name, first.PublicKey = "first", "first", testKey("B")
+		first.Enabled, first.IsExitNode, first.ExitNodeAllowAll = true, true, true
+		second := validPeer()
+		second.ID, second.Name, second.PublicKey = "second", "second", testKey("C")
+		second.AllowedIPs = "10.0.0.6/32"
+		second.Enabled, second.IsExitNode, second.ExitNodeAllowAll = true, true, true
+		if errs := ValidateConfig(validConfig(first, second)); !errs.HasField("allowedIPs") {
+			t.Fatalf("collision errors = %v, want allowedIPs", errs)
+		}
+	})
+
+	t.Run("BGP address and port", func(t *testing.T) {
+		first := validPeer()
+		first.ID, first.Name, first.PublicKey = "first", "first", testKey("B")
+		first.Enabled, first.BGPEnabled = true, true
+		first.BGPPeerIP, first.BGPPeerASN, first.BGPPeerPort = "10.0.0.2", 64513, 180
+		second := validPeer()
+		second.ID, second.Name, second.PublicKey = "second", "second", testKey("C")
+		second.AllowedIPs = "10.0.0.6/32"
+		second.Enabled, second.BGPEnabled = true, true
+		second.BGPPeerIP, second.BGPPeerASN, second.BGPPeerPort = "10.0.0.2", 64514, 179
+		errs := ValidateConfig(validConfig(first, second))
+		if !errs.HasField("bgpPeerPort") || !errs.HasField("bgpPeerIP") {
+			t.Fatalf("BGP collision errors = %v", errs)
+		}
+	})
+}
+
+func validConfig(peers ...Peer) AppConfig {
+	return AppConfig{
+		Server: ServerConfig{PrivateKey: testKey("A"), ListenPort: 51820, Address: "10.0.0.1/24"},
+		Peers:  peers,
+	}
+}
+
+func testKey(prefix string) string { return prefix + strings.Repeat("A", 42) + "=" }

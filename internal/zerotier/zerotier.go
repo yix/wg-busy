@@ -89,6 +89,7 @@ type Supervisor struct {
 	appliedG uint64 // generation the network reconcile last completed for
 
 	cmd         *exec.Cmd
+	processDone chan struct{}
 	exited      bool  // set by the reaper goroutine; guarded by mu, never read from cmd
 	exitErr     error //nolint:unused // logged when the service dies
 	client      *Client
@@ -377,9 +378,12 @@ func (s *Supervisor) ensureRunning(desired models.ZeroTierConfig) error {
 	}
 	log.Printf("[ZT] started zerotier-one (pid %d) port %d home %s", cmd.Process.Pid, port, s.homeDir)
 
-	// Reap the child so a crash is visible to the next tick.
+	// Reap the child so a crash is visible to the next tick. Close done before
+	// taking the mutex so stopService can wait while it owns the lock.
+	done := make(chan struct{})
 	go func() {
 		err := cmd.Wait()
+		close(done)
 		s.mu.Lock()
 		defer s.mu.Unlock()
 		if s.cmd == cmd {
@@ -389,6 +393,7 @@ func (s *Supervisor) ensureRunning(desired models.ZeroTierConfig) error {
 	}()
 
 	s.cmd = cmd
+	s.processDone = done
 	s.exited = false
 	s.runningPort = port
 	s.startedAt = time.Now()
@@ -402,18 +407,41 @@ func (s *Supervisor) stopService() {
 	if s.cmd == nil {
 		return
 	}
-	if s.cmd.Process != nil && !s.exited {
-		log.Printf("[ZT] stopping zerotier-one (pid %d)", s.cmd.Process.Pid)
-		_ = s.cmd.Process.Signal(syscall.SIGTERM)
-	}
-	// ponytail: no wait-then-kill escalation — zerotier-one exits promptly on
-	// SIGTERM and the reaper goroutine collects it. Add a timed Kill if a stuck
-	// daemon ever blocks a port change.
+	cmd, done, exited := s.cmd, s.processDone, s.exited
+	// Detach the process before waiting, then release the mutex so serviceLog and
+	// the reaper can finish. The supervisor loop that can start a replacement is
+	// the current caller and cannot advance until this function returns.
 	s.clearProcess()
+	s.mu.Unlock()
+	defer s.mu.Lock()
+
+	if cmd.Process != nil && !exited {
+		log.Printf("[ZT] stopping zerotier-one (pid %d)", cmd.Process.Pid)
+		_ = cmd.Process.Signal(syscall.SIGTERM)
+	}
+	if done != nil && !waitForProcess(done, 5*time.Second) {
+		log.Printf("[ZT] service did not exit after SIGTERM; killing pid %d", cmd.Process.Pid)
+		_ = cmd.Process.Kill()
+		if !waitForProcess(done, 2*time.Second) {
+			log.Printf("[ZT] service pid %d could not be reaped after kill", cmd.Process.Pid)
+		}
+	}
+}
+
+func waitForProcess(done <-chan struct{}, timeout time.Duration) bool {
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+	select {
+	case <-done:
+		return true
+	case <-timer.C:
+		return false
+	}
 }
 
 func (s *Supervisor) clearProcess() {
 	s.cmd = nil
+	s.processDone = nil
 	s.exited = false
 	s.serviceErr = ""
 	s.hint = ""

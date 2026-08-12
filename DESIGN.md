@@ -318,9 +318,11 @@ for an invalid hand-edited strict config, failing closed rather than leaking tra
 
 Source of truth: `config.yaml`. On every mutation:
 1. Clone the complete config, including nested slices, for rollback and live-state reconciliation
-2. Apply the mutation and validate cross-peer exit-node references
+2. Apply the mutation and validate the full configuration, including strict exit-node dependencies,
+   effective WireGuard prefix ownership, unique BGP peer identities, and runtime-supported BGP ports
 3. Save `config.yaml` and render `wg0.conf` atomically (write `.tmp`, rename); restore YAML on render failure
-4. Reload WireGuard with direct `wg-quick strip` → `wg syncconf` commands (no shell process substitution)
+4. Reload WireGuard with direct `wg-quick strip <configured path>` → `wg syncconf` commands
+   (no shell process substitution)
 5. Reconcile previous routing state to the new state and configure BGP
 6. Notify the asynchronous ZeroTier supervisor
 
@@ -328,6 +330,11 @@ Persistence errors roll back the mutation. A live service failure returns a type
 the UI reports that configuration was saved but not fully applied and renders the persisted state,
 so resubmitting cannot duplicate a create/delete operation. **Apply Config** restarts WireGuard and
 then retries routing and BGP reconciliation.
+
+Address, DNS, MTU, Table, FwMark, lifecycle-hook, and SaveConfig changes are owned by `wg-quick`
+and cannot be applied by `syncconf`. The store tracks them against the last successfully restarted
+server state and keeps returning `ApplyError` until **Apply Config** rebuilds the interface. BGP
+disable is independent: it always stops an active runtime even when wg0 is down or awaiting restart.
 
 ## BGP Runtime Lifecycle
 
@@ -464,13 +471,14 @@ Stage 2: alpine:3.20         → runtime with wireguard-tools, iptables, iproute
 
 ## WireGuard Auto-Start
 
-On startup, `main.go` runs `wg-quick up wg0` to bring the WireGuard interface up automatically. This ensures the VPN is running when the Docker container starts. The startup sequence:
+On startup, `main.go` rebuilds and starts the WireGuard interface automatically. The startup sequence:
 
 1. Load config, generate server keys if needed
 2. Render wg0.conf to disk
-3. Run `wg-quick up wg0` (log errors but don't fatal — wg0 may already be up)
-4. Start stats collector goroutine
-5. Start HTTP server
+3. Run `wg-quick down wg0`, then `wg-quick up <configured wg0.conf path>`
+4. Record the complete server state as live and start BGP
+5. Start stats collector goroutine
+6. Start HTTP server
 
 ## Stats Collection (`internal/wgstats/wgstats.go`)
 
@@ -665,8 +673,9 @@ bumps a generation counter. One background goroutine (2s tick, the same interval
 all the work:
 
 1. **Process**: start `zerotier-one -p<port> <homeDir>` when enabled and not running, SIGTERM when
-   disabled, restart when the port changes. A crashed daemon is restarted on the next tick, subject
-   to a 15s backoff so a broken binary cannot spin.
+   disabled, restart when the port changes. Shutdown waits up to five seconds before SIGKILL and
+   waits for reaping before a replacement starts. A crashed daemon is restarted on the next tick,
+   subject to a 15s backoff so a broken binary cannot spin.
 2. **Networks** (only when the generation changed): `POST /network/{id}` for *every* configured
    network — the endpoint is join-or-update, which is how a changed `allow*` flag reaches the
    service — plus `DELETE` for any joined network no longer in the config.

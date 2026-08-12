@@ -2,6 +2,7 @@ package wireguard
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"os/exec"
 	"strings"
@@ -10,6 +11,11 @@ import (
 	"golang.zx2c4.com/wireguard/wgctrl/wgtypes"
 
 	"github.com/yix/wg-busy/internal/models"
+)
+
+var (
+	ErrInterfaceDown = errors.New("WireGuard interface wg0 is not running")
+	ErrRestartNeeded = errors.New("WireGuard server settings were saved and require Apply Config")
 )
 
 var runCommand = func(name string, args []string, stdin []byte) ([]byte, error) {
@@ -23,14 +29,14 @@ var runCommand = func(name string, args []string, stdin []byte) ([]byte, error) 
 // Gracefully reload WireGuard server configuration
 // ReloadWGConfig gracefully reloads WireGuard server configuration.
 // It checks if the interface exists before attempting reload to avoid errors during startup.
-func ReloadWGConfig() (bool, error) {
+func ReloadWGConfig(configPath string) (bool, error) {
 	// Check if interface exists
 	if _, err := runCommand("ip", []string{"link", "show", "wg0"}, nil); err != nil {
 		// Interface doesn't exist (e.g. during startup), skip reload
 		return false, nil
 	}
 
-	stripped, err := runCommand("wg-quick", []string{"strip", "wg0"}, nil)
+	stripped, err := runCommand("wg-quick", []string{"strip", configPath}, nil)
 	if err != nil {
 		return true, fmt.Errorf("stripping WireGuard config: %w: %s", err, strings.TrimSpace(string(stripped)))
 	}
@@ -39,6 +45,34 @@ func ReloadWGConfig() (bool, error) {
 		return true, fmt.Errorf("reloading WireGuard config: %w: %s", err, strings.TrimSpace(string(out)))
 	}
 	return true, nil
+}
+
+// RestartWGConfig brings wg0 down and back up from the configured file. A
+// missing interface on the way down is harmless; failure to bring up the new
+// configuration is not.
+func RestartWGConfig(configPath string) error {
+	_, _ = runCommand("wg-quick", []string{"down", "wg0"}, nil)
+	output, err := runCommand("wg-quick", []string{"up", configPath}, nil)
+	if err != nil {
+		return fmt.Errorf("bringing up WireGuard config %q: %w: %s", configPath, err, strings.TrimSpace(string(output)))
+	}
+	return nil
+}
+
+// ServerRequiresRestart reports whether wg-quick-owned interface state changed.
+// These fields are deliberately absent from `wg-quick strip`, so syncconf can
+// never make them live.
+func ServerRequiresRestart(previous, next models.ServerConfig) bool {
+	return previous.Address != next.Address ||
+		previous.DNS != next.DNS ||
+		previous.MTU != next.MTU ||
+		previous.Table != next.Table ||
+		previous.FwMark != next.FwMark ||
+		previous.PreUp != next.PreUp ||
+		previous.PostUp != next.PostUp ||
+		previous.PreDown != next.PreDown ||
+		previous.PostDown != next.PostDown ||
+		previous.SaveConfig != next.SaveConfig
 }
 
 // GenerateKeyPair generates a WireGuard private key and derives the public key.

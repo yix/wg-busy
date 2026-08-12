@@ -115,6 +115,12 @@ func desiredPeers(cfg *models.AppConfig, defVRF *vrf.VRF, routerID uint32) (map[
 		if err != nil {
 			return nil, fmt.Errorf("peer %q has invalid BGP peer IP %q: %w", p.Name, p.BGPPeerIP, err)
 		}
+		if p.BGPPeerPort != 179 {
+			return nil, fmt.Errorf("peer %q uses unsupported BGP peer port %d; only 179 is supported", p.Name, p.BGPPeerPort)
+		}
+		if _, exists := desired[bPeerIP]; exists {
+			return nil, fmt.Errorf("multiple enabled BGP peers use address %s", bPeerIP.String())
+		}
 
 		peerCfg := server.PeerConfig{
 			AdminEnabled:               true,

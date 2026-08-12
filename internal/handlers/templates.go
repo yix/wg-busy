@@ -308,7 +308,8 @@ var templates = template.Must(template.New("").Funcs(template.FuncMap{
                         </label>
                         <label>
                             Peer Port *
-                            <input type="number" name="bgpPeerPort" value="{{if .Peer.BGPPeerPort}}{{.Peer.BGPPeerPort}}{{else}}179{{end}}" {{if .ValidationErrors.HasField "bgpPeerPort"}}aria-invalid="true"{{end}}>
+                            <input type="number" name="bgpPeerPort" value="179" min="179" max="179" readonly {{if .ValidationErrors.HasField "bgpPeerPort"}}aria-invalid="true"{{end}}>
+                            <small>The embedded BGP engine currently supports peer port 179.</small>
                             {{range .ValidationErrors}}{{if eq .Field "bgpPeerPort"}}<small class="field-error">{{.Message}}</small>{{end}}{{end}}
                         </label>
                     </div>
