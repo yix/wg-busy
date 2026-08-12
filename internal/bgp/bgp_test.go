@@ -55,6 +55,61 @@ func TestDesiredPeersRejectsUnsupportedRuntimeIdentity(t *testing.T) {
 	}
 }
 
+func TestDesiredPeersUseStableAddressIdentity(t *testing.T) {
+	registry := vrf.NewVRFRegistry()
+	defVRF := registry.CreateVRFIfNotExists(vrf.DefaultVRFName, 0)
+	cfg := &models.AppConfig{
+		Server: models.ServerConfig{BGPASN: 64512, BGPListenAddress: "10.0.0.1"},
+		Peers: []models.Peer{{
+			Name: "peer", Enabled: true, BGPEnabled: true,
+			BGPPeerIP: "10.0.0.2", BGPPeerPort: 179, BGPPeerASN: 64513,
+		}},
+	}
+
+	first, err := desiredPeers(cfg, defVRF, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := desiredPeers(cfg, defVRF, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for ip, firstCfg := range first {
+		secondCfg := second[ip]
+		if firstCfg.LocalAddress != secondCfg.LocalAddress {
+			t.Fatal("identical local addresses were not canonicalized")
+		}
+		if peerNeedsReplacement(&firstCfg, &secondCfg) {
+			t.Fatal("identical peer configuration requires replacement")
+		}
+	}
+}
+
+func TestRouteFilterChangeRequiresDurablePeerReplacement(t *testing.T) {
+	registry := vrf.NewVRFRegistry()
+	defVRF := registry.CreateVRFIfNotExists(vrf.DefaultVRFName, 0)
+	peer := models.Peer{
+		Name: "peer", Enabled: true, BGPEnabled: true,
+		BGPPeerIP: "10.0.0.2", BGPPeerPort: 179, BGPPeerASN: 64513,
+	}
+	cfg := &models.AppConfig{Server: models.ServerConfig{BGPASN: 64512}, Peers: []models.Peer{peer}}
+	before, err := desiredPeers(cfg, defVRF, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.Peers[0].BGPRouteFilters = []models.RouteFilter{{Prefix: "10.0.0.0/8", Matcher: "orlonger", Action: "accept"}}
+	after, err := desiredPeers(cfg, defVRF, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for ip, beforeCfg := range before {
+		afterCfg := after[ip]
+		if !peerNeedsReplacement(&beforeCfg, &afterCfg) {
+			t.Fatal("route-filter change did not require durable peer replacement")
+		}
+	}
+}
+
 func TestFailedKernelInitializationLeavesBGPStoppedAndRetryable(t *testing.T) {
 	mu.Lock()
 	originalKernel, originalActive := newKernel, active

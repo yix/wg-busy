@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"os"
 	"os/exec"
 	"strings"
 	"text/template"
@@ -48,10 +49,30 @@ func ReloadWGConfig(configPath string) (bool, error) {
 }
 
 // RestartWGConfig brings wg0 down and back up from the configured file. A
-// missing interface on the way down is harmless; failure to bring up the new
-// configuration is not.
+// missing interface on the way down is harmless; other teardown failures and
+// failure to bring up the new configuration are not.
 func RestartWGConfig(configPath string) error {
-	_, _ = runCommand("wg-quick", []string{"down", "wg0"}, nil)
+	if _, err := runCommand("ip", []string{"link", "show", "wg0"}, nil); err == nil {
+		// SaveConfig=true makes wg-quick down overwrite this file with live state.
+		// YAML is this application's source of truth, so preserve the freshly
+		// rendered desired config and restore it before bringing the interface up.
+		desired, err := os.ReadFile(configPath)
+		if err != nil {
+			return fmt.Errorf("reading WireGuard config %q before restart: %w", configPath, err)
+		}
+		output, downErr := runCommand("wg-quick", []string{"down", configPath}, nil)
+		restoreErr := os.WriteFile(configPath, desired, 0600)
+		if downErr != nil {
+			err := fmt.Errorf("bringing down WireGuard config %q: %w: %s", configPath, downErr, strings.TrimSpace(string(output)))
+			if restoreErr != nil {
+				err = errors.Join(err, fmt.Errorf("restoring WireGuard config %q after failed shutdown: %w", configPath, restoreErr))
+			}
+			return err
+		}
+		if restoreErr != nil {
+			return fmt.Errorf("restoring WireGuard config %q after shutdown: %w", configPath, restoreErr)
+		}
+	}
 	output, err := runCommand("wg-quick", []string{"up", configPath}, nil)
 	if err != nil {
 		return fmt.Errorf("bringing up WireGuard config %q: %w: %s", configPath, err, strings.TrimSpace(string(output)))

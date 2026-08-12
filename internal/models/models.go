@@ -511,6 +511,7 @@ func ValidateConfig(cfg AppConfig) ValidationErrors {
 	publicKeys := make(map[string]string, len(cfg.Peers))
 	allowedPrefixes := make(map[string]string)
 	bgpPeers := make(map[string]string)
+	routingTables := make(map[uint]string)
 	for _, p := range cfg.Peers {
 		if previous, ok := peerIDs[p.ID]; ok {
 			errs = append(errs, ValidationError{Field: "id", Message: fmt.Sprintf("peer %q duplicates ID used by %q", p.Name, previous)})
@@ -521,6 +522,30 @@ func ValidateConfig(cfg AppConfig) ValidationErrors {
 			errs = append(errs, ValidationError{Field: "publicKey", Message: fmt.Sprintf("peer %q duplicates key used by %q", p.Name, previous)})
 		} else {
 			publicKeys[p.PublicKey] = p.Name
+		}
+		if p.IsExitNode && p.RoutingTableID == 0 {
+			errs = append(errs, ValidationError{Field: "routingTableID", Message: fmt.Sprintf("exit-node peer %q has no routing table", p.Name)})
+		}
+		if len(p.PolicyRoutes) > 0 && p.PolicyRoutingTableID == 0 {
+			errs = append(errs, ValidationError{Field: "policyRoutingTableID", Message: fmt.Sprintf("peer %q has policy routes but no routing table", p.Name)})
+		}
+		for _, table := range []struct {
+			id    uint
+			field string
+			role  string
+		}{
+			{p.RoutingTableID, "routingTableID", "exit-node table"},
+			{p.PolicyRoutingTableID, "policyRoutingTableID", "policy table"},
+		} {
+			if table.id == 0 {
+				continue
+			}
+			owner := fmt.Sprintf("peer %q %s", p.Name, table.role)
+			if previous, ok := routingTables[table.id]; ok {
+				errs = append(errs, ValidationError{Field: table.field, Message: fmt.Sprintf("%s reuses table %d assigned to %s", owner, table.id, previous)})
+			} else {
+				routingTables[table.id] = owner
+			}
 		}
 		if !p.Enabled {
 			continue
@@ -703,13 +728,49 @@ func isValidFwMark(s string) bool {
 	return err == nil
 }
 
-// FirstIP extracts the IP (without mask) from a CIDR string.
-// Returns empty string if invalid.
-func FirstIP(cidr string) string {
-	cidr = strings.TrimSpace(strings.Split(cidr, ",")[0])
-	ip, _, err := net.ParseCIDR(cidr)
-	if err != nil {
-		return ""
+// PeerIPs extracts every unique host IP (without masks) from a CIDR list.
+func PeerIPs(cidrs string) []string {
+	var result []string
+	seen := make(map[string]bool)
+	for _, cidr := range strings.Split(cidrs, ",") {
+		ip, _, err := net.ParseCIDR(strings.TrimSpace(cidr))
+		if err != nil || seen[ip.String()] {
+			continue
+		}
+		seen[ip.String()] = true
+		result = append(result, ip.String())
 	}
-	return ip.String()
+	return result
+}
+
+// PeerSources returns every unique source selector represented by AllowedIPs.
+// Host routes omit the redundant mask; wider prefixes retain it so strict
+// routing covers every source address the WireGuard peer is authorized to use.
+func PeerSources(cidrs string) []string {
+	var result []string
+	seen := make(map[string]bool)
+	for _, cidr := range strings.Split(cidrs, ",") {
+		ip, network, err := net.ParseCIDR(strings.TrimSpace(cidr))
+		if err != nil {
+			continue
+		}
+		ones, bits := network.Mask.Size()
+		selector := network.String()
+		if ones == bits {
+			selector = ip.String()
+		}
+		if !seen[selector] {
+			seen[selector] = true
+			result = append(result, selector)
+		}
+	}
+	return result
+}
+
+// FirstIP extracts the first IP (without mask) from a CIDR list.
+func FirstIP(cidrs string) string {
+	if ips := PeerIPs(cidrs); len(ips) > 0 {
+		return ips[0]
+	}
+	return ""
 }

@@ -74,6 +74,22 @@ func TestDeviceForGateway(t *testing.T) {
 	}
 }
 
+func TestPeerIPsReturnsEveryUniqueAddress(t *testing.T) {
+	want := []string{"10.0.0.5", "fd00::5"}
+	got := PeerIPs("10.0.0.5/32, fd00::5/128, 10.0.0.5/32")
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("PeerIPs() = %v, want %v", got, want)
+	}
+}
+
+func TestPeerSourcesRetainsAuthorizedSubnets(t *testing.T) {
+	want := []string{"10.0.0.5", "192.168.50.0/24", "fd00::5"}
+	got := PeerSources("10.0.0.5/32, 192.168.50.8/24, fd00::5/128")
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("PeerSources() = %v, want %v", got, want)
+	}
+}
+
 // validPeer returns a peer that passes validation, so tests only assert on the
 // field they change.
 func validPeer() Peer {
@@ -226,7 +242,7 @@ func TestValidateConfigRejectsStrictPeerAfterExitCascade(t *testing.T) {
 	exit := validPeer()
 	exit.ID, exit.Name, exit.PublicKey = "exit", "exit", testKey("B")
 	exit.AllowedIPs = "10.0.0.6/32"
-	exit.Enabled, exit.IsExitNode = true, true
+	exit.Enabled, exit.IsExitNode, exit.RoutingTableID = true, true, 100
 	client := validPeer()
 	client.ID, client.Name, client.PublicKey = "client", "client", testKey("C")
 	client.Enabled, client.ExitNodeID, client.StrictPolicyRouting = true, exit.ID, true
@@ -238,6 +254,29 @@ func TestValidateConfigRejectsStrictPeerAfterExitCascade(t *testing.T) {
 	CascadeClearExitNode(cfg.Peers, exit.ID)
 	if errs := ValidateConfig(cfg); !errs.HasField("strictPolicyRouting") {
 		t.Fatalf("cascaded strict peer errors = %v, want strictPolicyRouting", errs)
+	}
+}
+
+func TestValidateConfigRejectsInvalidRoutingTableAssignments(t *testing.T) {
+	exit := validPeer()
+	exit.ID, exit.Name, exit.PublicKey = "exit", "exit", testKey("B")
+	exit.Enabled, exit.IsExitNode = true, true
+	policy := validPeer()
+	policy.ID, policy.Name, policy.PublicKey = "policy", "policy", testKey("C")
+	policy.AllowedIPs = "10.0.0.6/32"
+	policy.Enabled = true
+	policy.PolicyRoutes = []string{"10.5.5.0/24 via 10.0.0.2"}
+
+	errs := ValidateConfig(validConfig(exit, policy))
+	if !errs.HasField("routingTableID") || !errs.HasField("policyRoutingTableID") {
+		t.Fatalf("missing table errors = %v", errs)
+	}
+
+	exit.RoutingTableID = 100
+	policy.PolicyRoutingTableID = 100
+	errs = ValidateConfig(validConfig(exit, policy))
+	if !errs.HasField("policyRoutingTableID") {
+		t.Fatalf("duplicate table errors = %v", errs)
 	}
 }
 

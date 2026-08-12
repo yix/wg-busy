@@ -223,15 +223,7 @@ func (h *handler) CreatePeer(w http.ResponseWriter, r *http.Request) {
 			peer.AllowedIPs = ip
 		}
 
-		// Auto-assign routing table ID if exit node.
-		if peer.IsExitNode {
-			peer.RoutingTableID = routing.AssignRoutingTableID(cfg.Peers)
-		}
-
-		// Auto-assign policy routing table ID if policy routes exist.
-		if len(peer.PolicyRoutes) > 0 {
-			peer.PolicyRoutingTableID = routing.AssignRoutingTableID(cfg.Peers)
-		}
+		assignNewPeerRoutingTables(&peer, cfg.Peers)
 
 		// Validate.
 		if errs := peer.Validate(models.GatewayNets(cfg.Server.Address, h.ztGatewayNets())); len(errs) > 0 {
@@ -256,6 +248,16 @@ func (h *handler) CreatePeer(w http.ResponseWriter, r *http.Request) {
 	// We return an empty string (200 OK) for the form target (#modal-container), which clears the modal.
 	// The OOB swap updates the peers list in the background.
 	h.listPeersOOB(w, r)
+}
+
+func assignNewPeerRoutingTables(peer *models.Peer, existing []models.Peer) {
+	if peer.IsExitNode {
+		peer.RoutingTableID = routing.AssignRoutingTableID(existing)
+	}
+	if len(peer.PolicyRoutes) > 0 {
+		reserved := append(append([]models.Peer(nil), existing...), *peer)
+		peer.PolicyRoutingTableID = routing.AssignRoutingTableID(reserved)
+	}
 }
 
 // UpdatePeer handles PUT /peers/{id}.

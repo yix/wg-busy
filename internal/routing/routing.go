@@ -3,6 +3,7 @@ package routing
 import (
 	"errors"
 	"fmt"
+	"net"
 	"os/exec"
 	"strings"
 
@@ -49,9 +50,10 @@ const rulePriorityBase = 10000
 // peerRule is one `ip rule` entry. Both PostUp and PostDown render from the same
 // specs, so teardown always matches what was installed.
 type peerRule struct {
-	Selector string // e.g. "from 10.0.0.5"
-	Action   string // e.g. "table 100" or "prohibit"
-	Priority int
+	IPCommand string // "ip" for IPv4, "ip -6" for IPv6
+	Selector  string // e.g. "from 10.0.0.5"
+	Action    string // e.g. "table 100" or "prohibit"
+	Priority  int
 }
 
 // peerRules returns every ip rule to install, in evaluation order.
@@ -66,31 +68,37 @@ func peerRules(cfg models.AppConfig, exitNodes map[string]models.Peer) []peerRul
 		if !p.Enabled {
 			continue
 		}
-		peerIP := models.FirstIP(p.AllowedIPs)
-		if peerIP == "" {
+		peerSources := models.PeerSources(p.AllowedIPs)
+		if len(peerSources) == 0 {
 			continue
 		}
-		selector := "from " + peerIP
+		for _, peerSource := range peerSources {
+			ipCommand := "ip"
+			if strings.Contains(peerSource, ":") {
+				ipCommand = "ip -6"
+			}
+			selector := "from " + peerSource
 
-		// Exit node table, when this peer routes through one.
-		if p.ExitNodeID != "" {
-			if exitNode, ok := exitNodes[p.ExitNodeID]; ok {
-				rules = append(rules, peerRule{selector, fmt.Sprintf("table %d", exitNode.RoutingTableID), prio})
+			// Exit node table, when this peer routes through one.
+			if p.ExitNodeID != "" {
+				if exitNode, ok := exitNodes[p.ExitNodeID]; ok {
+					rules = append(rules, peerRule{ipCommand, selector, fmt.Sprintf("table %d", exitNode.RoutingTableID), prio})
+					prio++
+				}
+			}
+
+			// The peer's own policy table.
+			if len(p.PolicyRoutes) > 0 && p.PolicyRoutingTableID > 0 {
+				rules = append(rules, peerRule{ipCommand, selector, fmt.Sprintf("table %d", p.PolicyRoutingTableID), prio})
 				prio++
 			}
-		}
 
-		// The peer's own policy table.
-		if len(p.PolicyRoutes) > 0 && p.PolicyRoutingTableID > 0 {
-			rules = append(rules, peerRule{selector, fmt.Sprintf("table %d", p.PolicyRoutingTableID), prio})
-			prio++
-		}
-
-		// Strict always fails closed. Validation normally guarantees a lookup
-		// first, but a hand-edited invalid config must never fall through to main.
-		if p.StrictPolicyRouting {
-			rules = append(rules, peerRule{selector, "prohibit", prio})
-			prio++
+			// Strict always fails closed. Validation normally guarantees a lookup
+			// first, but a hand-edited invalid config must never fall through to main.
+			if p.StrictPolicyRouting {
+				rules = append(rules, peerRule{ipCommand, selector, "prohibit", prio})
+				prio++
+			}
 		}
 	}
 	return rules
@@ -134,11 +142,15 @@ func zeroTierMasquerade(cfg models.AppConfig, add bool) []string {
 // cannot be installed now is installed by the next apply; losing the whole
 // interface is never the better failure.
 func policyRouteCmd(action, subnet, gateway string, table uint, gateways []models.GatewayNet) string {
+	ipCommand := "ip"
+	if ip, _, err := net.ParseCIDR(subnet); err == nil && ip.To4() == nil {
+		ipCommand = "ip -6"
+	}
 	if action == "del" {
 		// Deletion only needs the route key. Omitting the old gateway and device
 		// also makes cleanup work immediately after process startup, before the
 		// ZeroTier supervisor has rediscovered the interface that installed it.
-		return fmt.Sprintf("ip route del %s table %d || true", subnet, table)
+		return fmt.Sprintf("%s route del %s table %d || true", ipCommand, subnet, table)
 	}
 	dev := models.DeviceForGateway(gateway, gateways)
 	if dev == "" {
@@ -147,7 +159,7 @@ func policyRouteCmd(action, subnet, gateway string, table uint, gateways []model
 		// yet still lands here, and the guard keeps it harmless.
 		dev = models.WGDevice
 	}
-	return fmt.Sprintf("ip route %s %s via %s dev %s table %d || true", action, subnet, gateway, dev, table)
+	return fmt.Sprintf("%s route %s %s via %s dev %s table %d || true", ipCommand, action, subnet, gateway, dev, table)
 }
 
 // enabledExitNodes returns the exit nodes traffic can currently be steered to,
@@ -171,20 +183,22 @@ func exitNodeRouteCmds(action string, exitNodes map[string]models.Peer) []string
 		if done[exitNode.RoutingTableID] {
 			continue
 		}
-		exitIP := models.FirstIP(exitNode.AllowedIPs)
-		if exitIP == "" {
-			continue
-		}
 		if exitNode.ExitNodeAllowAll {
-			cmd := fmt.Sprintf("ip route %s default via %s dev wg0 table %d", action, exitIP, exitNode.RoutingTableID)
-			if action == "del" {
-				cmd += " || true"
+			for _, ipCommand := range []string{"ip -4", "ip -6"} {
+				cmd := fmt.Sprintf("%s route %s default dev wg0 table %d", ipCommand, action, exitNode.RoutingTableID)
+				if action == "del" {
+					cmd += " || true"
+				}
+				cmds = append(cmds, cmd)
 			}
-			cmds = append(cmds, cmd)
 		} else {
 			for _, route := range exitNode.ExitNodeRoutes {
 				if route != "" {
-					cmd := fmt.Sprintf("ip route %s %s via %s dev wg0 table %d", action, route, exitIP, exitNode.RoutingTableID)
+					ipCommand := "ip -4"
+					if ip, _, err := net.ParseCIDR(route); err == nil && ip.To4() == nil {
+						ipCommand = "ip -6"
+					}
+					cmd := fmt.Sprintf("%s route %s %s dev wg0 table %d", ipCommand, action, route, exitNode.RoutingTableID)
 					if action == "del" {
 						cmd += " || true"
 					}
@@ -204,7 +218,7 @@ func policyRouteCmds(action string, cfg models.AppConfig, gateways []models.Gate
 		if !p.Enabled || len(p.PolicyRoutes) == 0 || p.PolicyRoutingTableID == 0 {
 			continue
 		}
-		if models.FirstIP(p.AllowedIPs) == "" {
+		if len(models.PeerIPs(p.AllowedIPs)) == 0 {
 			continue
 		}
 
@@ -239,8 +253,8 @@ func GeneratePostUpCommands(cfg models.AppConfig, gateways []models.GatewayNet) 
 	// ran would abort the whole interface bring-up. Deleting by priority alone
 	// also clears a stale rule whose selector has since changed.
 	for _, r := range peerRules(cfg, exitNodes) {
-		cmds = append(cmds, fmt.Sprintf("ip rule del priority %d 2>/dev/null || true; ip rule add %s %s priority %d",
-			r.Priority, r.Selector, r.Action, r.Priority))
+		cmds = append(cmds, fmt.Sprintf("%s rule del priority %d 2>/dev/null || true; %s rule add %s %s priority %d",
+			r.IPCommand, r.Priority, r.IPCommand, r.Selector, r.Action, r.Priority))
 	}
 
 	// Add the routes that populate each peer's own policy table.
@@ -287,7 +301,7 @@ func GeneratePostDownCommands(cfg models.AppConfig, gateways []models.GatewayNet
 	// Remove policy rules first. Deleting by priority is exact, so repeated
 	// apply cycles cannot leave duplicates behind.
 	for _, r := range peerRules(cfg, exitNodes) {
-		cmds = append(cmds, fmt.Sprintf("ip rule del %s %s priority %d || true", r.Selector, r.Action, r.Priority))
+		cmds = append(cmds, fmt.Sprintf("%s rule del %s %s priority %d || true", r.IPCommand, r.Selector, r.Action, r.Priority))
 	}
 
 	// Remove routing tables.

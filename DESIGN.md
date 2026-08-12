@@ -201,10 +201,12 @@ If an exit node is configured with specific routes (e.g. `10.10.0.0/24`), only t
 
 ```ini
 PostUp = iptables -A FORWARD -i wg0 -j ACCEPT; ...     # user-defined
-PostUp = ip route add default via 10.0.0.5 dev wg0 table 100
+PostUp = ip -4 route replace default dev wg0 table 100
+PostUp = ip -6 route replace default dev wg0 table 100
 PostUp = ip rule add from 10.0.0.2 table 100
 PostDown = ip rule del from 10.0.0.2 table 100
-PostDown = ip route del default via 10.0.0.5 dev wg0 table 100
+PostDown = ip -6 route del default dev wg0 table 100
+PostDown = ip -4 route del default dev wg0 table 100
 PostDown = iptables -D FORWARD -i wg0 -j ACCEPT; ...   # user-defined
 ```
 
@@ -212,14 +214,15 @@ PostDown = iptables -D FORWARD -i wg0 -j ACCEPT; ...   # user-defined
 - Base: 100 (constant)
 - Auto-assigned when `IsExitNode` set to true, persisted in YAML
 - Freed when `IsExitNode` set to false
-- Scan existing peers to find next unused ID
+- Scan both exit-node and policy tables to find the next unused ID
+- Reserve distinct IDs when a peer has both roles; full-config validation rejects missing or duplicate IDs
 
 ### Routing Module (`internal/routing/routing.go`)
 - `GeneratePostUpCommands(cfg AppConfig) []string`
 - `GeneratePostDownCommands(cfg AppConfig) []string`
 - `AssignRoutingTableID(peers []Peer) uint`
-- Per exit node: `ip route add default via <exit_ip> dev wg0 table <table_id>`
-- Per peer using exit node: `ip rule add from <peer_ip> table <table_id>`
+- Per exit node: family-specific `ip route replace default dev wg0 table <table_id>` commands
+- Per peer using an exit node: one `ip rule` for every source address/prefix in `AllowedIPs`
 - PostDown: mirror teardown in reverse order
 
 ### Validation
@@ -237,7 +240,7 @@ Peers can declare "Advertised Routes", which are subnets that reside behind the 
 ### Policy Routes
 If you need granular control where traffic from a specific peer destined to specific subnets must be routed via a distinct gateway IP, you can configure "Policy Routes" (formatted as `<CIDR> via <Gateway IP>`).
 When defined, WG-Busy assigns a dedicated `PolicyRoutingTableID` to the peer and injects:
-- `ip rule add from <peer_ip> table <table_id>`
+- `ip rule add from <peer_source> table <table_id>` for every address or authorized source prefix
 - `ip route add <CIDR> via <Gateway IP> dev <iface> table <table_id>`
 These commands are added to `PostUp` and mirrored in `PostDown` for clean teardown. They do not
 depend on exit nodes — a peer with only policy routes still gets both.
@@ -348,6 +351,11 @@ The app supplies a small `bio-rd` listener manager because the dependency's buil
 close API; this releases TCP sockets on disable and rebind. Peer add/replace and filter errors are
 returned to the store instead of being logged as successful. The dashboard reports Running only
 when a fully initialized runtime is published.
+
+Peer addresses are canonicalized before comparison because `bio-rd` compares its stored local-address
+pointer by identity. Unrelated configuration saves therefore preserve established sessions. Semantic
+peer changes, including route-filter changes, replace only that peer; filter replacement is durable for
+future passive sessions rather than being applied only to the currently connected FSM.
 
 ## API Endpoints
 

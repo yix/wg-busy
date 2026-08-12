@@ -171,6 +171,54 @@ func TestStrictPolicyRoutingOrder(t *testing.T) {
 	}
 }
 
+func TestStrictPolicyRoutingCoversEveryAddressFamily(t *testing.T) {
+	cfg := models.AppConfig{Peers: []models.Peer{{
+		ID: "p1", Enabled: true, AllowedIPs: "10.0.0.5/32, fd00::5/128",
+		PolicyRoutingTableID: 100,
+		PolicyRoutes:         []string{"10.5.5.0/24 via 10.0.0.2"},
+		StrictPolicyRouting:  true,
+	}}}
+
+	commands := strings.Join(GeneratePostUpCommands(cfg, nil), "\n")
+	for _, want := range []string{
+		"ip rule add from 10.0.0.5 prohibit",
+		"ip -6 rule add from fd00::5 prohibit",
+	} {
+		if !strings.Contains(commands, want) {
+			t.Errorf("missing %q:\n%s", want, commands)
+		}
+	}
+}
+
+func TestStrictPolicyRoutingCoversAuthorizedSourceSubnet(t *testing.T) {
+	cfg := models.AppConfig{Peers: []models.Peer{{
+		ID: "p1", Enabled: true, AllowedIPs: "10.0.0.5/32, 192.168.50.0/24",
+		PolicyRoutingTableID: 100,
+		PolicyRoutes:         []string{"10.5.5.0/24 via 10.0.0.2"},
+		StrictPolicyRouting:  true,
+	}}}
+	commands := strings.Join(GeneratePostUpCommands(cfg, nil), "\n")
+	if !strings.Contains(commands, "ip rule add from 192.168.50.0/24 prohibit") {
+		t.Fatalf("authorized source subnet bypasses strict routing:\n%s", commands)
+	}
+}
+
+func TestFullExitNodeBuildsBothAddressFamilyRoutes(t *testing.T) {
+	cfg := models.AppConfig{Peers: []models.Peer{{
+		ID: "exit", Enabled: true, AllowedIPs: "10.0.0.6/32, fd00::6/128",
+		IsExitNode: true, ExitNodeAllowAll: true, RoutingTableID: 100,
+	}}}
+	commands := strings.Join(GeneratePostUpCommands(cfg, nil), "\n")
+	for _, want := range []string{
+		"ip -4 route replace default dev wg0 table 100",
+		"ip -6 route replace default dev wg0 table 100",
+	} {
+		if !strings.Contains(commands, want) {
+			t.Errorf("missing %q:\n%s", want, commands)
+		}
+	}
+}
+
 // A rule priority that is already taken makes `ip rule add` fail with EEXIST,
 // and wg-quick runs hooks under set -e — so a leftover rule from a teardown that
 // never ran would abort the whole interface bring-up. Every add must therefore

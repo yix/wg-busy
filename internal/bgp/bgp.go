@@ -150,6 +150,11 @@ func desiredPeers(cfg *models.AppConfig, defVRF *vrf.VRF, routerID uint32) (map[
 			unspec, _ := bnet.IPFromString("::")
 			peerCfg.LocalAddress = &unspec
 		}
+		// bio-rd canonicalizes these pointers inside AddPeer and later compares
+		// LocalAddress by pointer identity. Canonicalize the desired config too so
+		// an unrelated save does not look like a peer-address change.
+		peerCfg.LocalAddress = peerCfg.LocalAddress.Dedup()
+		peerCfg.PeerAddress = peerCfg.PeerAddress.Dedup()
 
 		importFilter := buildFilterChain(p.BGPRouteFilters)
 		exportFilter := filter.NewAcceptAllFilterChain()
@@ -197,7 +202,7 @@ func reconcilePeers(runtime *bgpRuntime, cfg *models.AppConfig) error {
 			}
 			continue
 		}
-		if oldCfg.NeedsRestart(&peerCfg) {
+		if peerNeedsReplacement(oldCfg, &peerCfg) {
 			previous := *oldCfg
 			runtime.server.DisposePeer(defVRF, &peerCopy)
 			if err := runtime.server.AddPeer(peerCfg); err != nil {
@@ -208,31 +213,27 @@ func reconcilePeers(runtime *bgpRuntime, cfg *models.AppConfig) error {
 				}
 				applyErrs = append(applyErrs, replaceErr)
 			}
-			continue
-		}
-		for _, change := range []struct {
-			name string
-			fn   func() error
-		}{
-			{"IPv4 import", func() error {
-				return runtime.server.ReplaceImportFilterChain(defVRF, &peerCopy, peerCfg.IPv4.ImportFilterChain)
-			}},
-			{"IPv4 export", func() error {
-				return runtime.server.ReplaceExportFilterChain(defVRF, &peerCopy, peerCfg.IPv4.ExportFilterChain)
-			}},
-			{"IPv6 import", func() error {
-				return runtime.server.ReplaceImportFilterChain(defVRF, &peerCopy, peerCfg.IPv6.ImportFilterChain)
-			}},
-			{"IPv6 export", func() error {
-				return runtime.server.ReplaceExportFilterChain(defVRF, &peerCopy, peerCfg.IPv6.ExportFilterChain)
-			}},
-		} {
-			if err := change.fn(); err != nil {
-				applyErrs = append(applyErrs, fmt.Errorf("update %s filter for BGP peer %s: %w", change.name, peerCopy.String(), err))
-			}
 		}
 	}
 	return errors.Join(applyErrs...)
+}
+
+// peerNeedsReplacement compares the semantic peer configuration. Route-filter
+// changes replace the peer because bio-rd's live replacement API updates only
+// current FSMs, not the base configuration used by future passive sessions.
+func peerNeedsReplacement(current, desired *server.PeerConfig) bool {
+	if current.NeedsRestart(desired) {
+		return true
+	}
+	return addressFamilyChanged(current.IPv4, desired.IPv4) || addressFamilyChanged(current.IPv6, desired.IPv6)
+}
+
+func addressFamilyChanged(current, desired *server.AddressFamilyConfig) bool {
+	if current == nil || desired == nil {
+		return current != desired
+	}
+	return !current.ImportFilterChain.Equal(desired.ImportFilterChain) ||
+		!current.ExportFilterChain.Equal(desired.ExportFilterChain)
 }
 
 func startRuntime(cfg *models.AppConfig, state bgpServerState) (*bgpRuntime, error) {
