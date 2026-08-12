@@ -1,6 +1,7 @@
 package wireguard
 
 import (
+	"bytes"
 	"fmt"
 	"os/exec"
 	"strings"
@@ -11,22 +12,33 @@ import (
 	"github.com/yix/wg-busy/internal/models"
 )
 
+var runCommand = func(name string, args []string, stdin []byte) ([]byte, error) {
+	cmd := exec.Command(name, args...)
+	if stdin != nil {
+		cmd.Stdin = bytes.NewReader(stdin)
+	}
+	return cmd.CombinedOutput()
+}
+
 // Gracefully reload WireGuard server configuration
 // ReloadWGConfig gracefully reloads WireGuard server configuration.
 // It checks if the interface exists before attempting reload to avoid errors during startup.
-func ReloadWGConfig() error {
+func ReloadWGConfig() (bool, error) {
 	// Check if interface exists
-	if err := exec.Command("ip", "link", "show", "wg0").Run(); err != nil {
+	if _, err := runCommand("ip", []string{"link", "show", "wg0"}, nil); err != nil {
 		// Interface doesn't exist (e.g. during startup), skip reload
-		return nil
+		return false, nil
 	}
 
-	cmd := exec.Command("sh", "-c", "wg syncconf wg0 <(wg-quick strip wg0)")
-	_, err := cmd.CombinedOutput()
+	stripped, err := runCommand("wg-quick", []string{"strip", "wg0"}, nil)
 	if err != nil {
-		return fmt.Errorf("failed to reload config: %v", err)
+		return true, fmt.Errorf("stripping WireGuard config: %w: %s", err, strings.TrimSpace(string(stripped)))
 	}
-	return nil
+	out, err := runCommand("wg", []string{"syncconf", "wg0", "/dev/stdin"}, stripped)
+	if err != nil {
+		return true, fmt.Errorf("reloading WireGuard config: %w: %s", err, strings.TrimSpace(string(out)))
+	}
+	return true, nil
 }
 
 // GenerateKeyPair generates a WireGuard private key and derives the public key.

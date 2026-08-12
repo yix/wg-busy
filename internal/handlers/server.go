@@ -85,6 +85,8 @@ func (h *handler) UpdateServerConfig(w http.ResponseWriter, r *http.Request) {
 		if ve, ok := writeErr.(models.ValidationErrors); ok {
 			data.ValidationErrors = ve
 			w.WriteHeader(http.StatusUnprocessableEntity)
+		} else if _, ok := applyError(writeErr); ok {
+			data.Error = writeErr.Error()
 		} else {
 			data.Error = writeErr.Error()
 			w.WriteHeader(http.StatusInternalServerError)

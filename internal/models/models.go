@@ -17,6 +17,20 @@ type AppConfig struct {
 	ZeroTier ZeroTierConfig `yaml:"zerotier,omitempty"`
 }
 
+// Clone returns an independent copy suitable for rollback and reconciliation.
+func (c AppConfig) Clone() AppConfig {
+	clone := c
+	clone.Peers = append([]Peer(nil), c.Peers...)
+	for i := range clone.Peers {
+		clone.Peers[i].ExitNodeRoutes = append([]string(nil), c.Peers[i].ExitNodeRoutes...)
+		clone.Peers[i].AdvertisedRoutes = append([]string(nil), c.Peers[i].AdvertisedRoutes...)
+		clone.Peers[i].PolicyRoutes = append([]string(nil), c.Peers[i].PolicyRoutes...)
+		clone.Peers[i].BGPRouteFilters = append([]RouteFilter(nil), c.Peers[i].BGPRouteFilters...)
+	}
+	clone.ZeroTier.Networks = append([]ZeroTierNetwork(nil), c.ZeroTier.Networks...)
+	return clone
+}
+
 // ZeroTierConfig is the desired state of the local ZeroTier client.
 type ZeroTierConfig struct {
 	Enabled  bool              `yaml:"enabled,omitempty"`
@@ -455,6 +469,27 @@ func (p *Peer) Validate(gateways []GatewayNet) ValidationErrors {
 		}
 	}
 
+	return errs
+}
+
+// ValidateExitNodeRefs validates relationships that require the complete peer set.
+func ValidateExitNodeRefs(peers []Peer) ValidationErrors {
+	exitNodes := make(map[string]bool, len(peers))
+	for _, p := range peers {
+		if p.Enabled && p.IsExitNode {
+			exitNodes[p.ID] = true
+		}
+	}
+
+	var errs ValidationErrors
+	for _, p := range peers {
+		if p.ExitNodeID != "" && !exitNodes[p.ExitNodeID] {
+			errs = append(errs, ValidationError{
+				Field:   "exitNodeID",
+				Message: fmt.Sprintf("references missing, disabled, or non-exit peer %q", p.ExitNodeID),
+			})
+		}
+	}
 	return errs
 }
 

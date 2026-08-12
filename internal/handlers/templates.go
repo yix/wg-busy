@@ -21,7 +21,7 @@ var templates = template.Must(template.New("").Funcs(template.FuncMap{
 {{end}}
 
 {{define "toast-error"}}
-<div class="toast toast-error" role="alert">{{.}}</div>
+<div class="toast toast-error" role="alert" hx-swap-oob="beforeend:#toast-container">{{.}}</div>
 {{end}}
 
 {{/* Summary of every validation error, so errors on fields without their own

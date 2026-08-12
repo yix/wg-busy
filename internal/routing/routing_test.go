@@ -1,6 +1,7 @@
 package routing
 
 import (
+	"errors"
 	"fmt"
 	"slices"
 	"strings"
@@ -41,8 +42,11 @@ func TestPolicyRouteDeviceSelection(t *testing.T) {
 	}
 
 	down := strings.Join(GeneratePostDownCommands(cfg, gateways), "\n")
-	if !strings.Contains(down, "ip route del 10.9.9.0/24 via 10.147.17.99 dev zt5u4va25t table 100 || true") {
-		t.Errorf("ZeroTier route not cleaned up on its own device:\n%s", down)
+	if !strings.Contains(down, "ip route del 10.9.9.0/24 table 100 || true") {
+		t.Errorf("ZeroTier route not cleaned up by prefix and table:\n%s", down)
+	}
+	if strings.Contains(down, "dev zt5u4va25t") {
+		t.Errorf("policy route teardown depends on rediscovering its old interface:\n%s", down)
 	}
 
 	// Without ZeroTier the same route falls back to wg0 rather than emitting an
@@ -50,6 +54,63 @@ func TestPolicyRouteDeviceSelection(t *testing.T) {
 	noZT := strings.Join(GeneratePostUpCommands(cfg, models.GatewayNets(cfg.Server.Address, nil)), "\n")
 	if !strings.Contains(noZT, "ip route replace 10.9.9.0/24 via 10.147.17.99 dev wg0 table 100") {
 		t.Errorf("unknown gateway did not fall back to wg0:\n%s", noZT)
+	}
+}
+
+func TestReconcileRemovesPreviousRulesBeforeAddingNext(t *testing.T) {
+	previous := models.AppConfig{Peers: []models.Peer{{
+		ID: "p1", Enabled: true, AllowedIPs: "10.0.0.5/32",
+		PolicyRoutingTableID: 100, PolicyRoutes: []string{"10.5.5.0/24 via 10.0.0.2"},
+		StrictPolicyRouting: true,
+	}}}
+	next := previous.Clone()
+	next.Peers[0].StrictPolicyRouting = false
+
+	originalUp, originalRun := interfaceUp, runShellCommand
+	t.Cleanup(func() { interfaceUp, runShellCommand = originalUp, originalRun })
+	interfaceUp = func() bool { return true }
+	var commands []string
+	runShellCommand = func(command string) ([]byte, error) {
+		commands = append(commands, command)
+		return nil, nil
+	}
+	if err := Reconcile(previous, nil, next, nil); err != nil {
+		t.Fatal(err)
+	}
+	joined := strings.Join(commands, "\n")
+	deleteAt := strings.Index(joined, "ip rule del from 10.0.0.5 prohibit")
+	addAt := strings.Index(joined, "ip rule add from 10.0.0.5 table 100")
+	if deleteAt < 0 || addAt < 0 || deleteAt > addAt {
+		t.Fatalf("previous strict rule was not removed before next state:\n%s", joined)
+	}
+}
+
+func TestReconcileRestoresPreviousStateOnFailure(t *testing.T) {
+	previous := models.AppConfig{Peers: []models.Peer{{
+		ID: "p1", Enabled: true, AllowedIPs: "10.0.0.5/32",
+		PolicyRoutingTableID: 100, PolicyRoutes: []string{"10.5.5.0/24 via 10.0.0.2"},
+	}}}
+	next := previous.Clone()
+	next.Peers[0].AllowedIPs = "10.0.0.9/32"
+
+	originalUp, originalRun := interfaceUp, runShellCommand
+	t.Cleanup(func() { interfaceUp, runShellCommand = originalUp, originalRun })
+	interfaceUp = func() bool { return true }
+	failed := false
+	var commands []string
+	runShellCommand = func(command string) ([]byte, error) {
+		commands = append(commands, command)
+		if !failed && strings.Contains(command, "ip rule add from 10.0.0.9") {
+			failed = true
+			return []byte("boom"), errors.New("exit 1")
+		}
+		return nil, nil
+	}
+	if err := Reconcile(previous, nil, next, nil); err == nil {
+		t.Fatal("Reconcile succeeded after command failure")
+	}
+	if !strings.Contains(strings.Join(commands, "\n"), "ip rule add from 10.0.0.5") {
+		t.Fatalf("previous state was not restored:\n%s", strings.Join(commands, "\n"))
 	}
 }
 
@@ -150,6 +211,20 @@ func TestNonStrictHasNoRejectRule(t *testing.T) {
 		if strings.Contains(cmd, "prohibit") {
 			t.Errorf("unexpected reject rule for a non-strict peer: %s", cmd)
 		}
+	}
+}
+
+func TestStrictMissingExitNodeFailsClosed(t *testing.T) {
+	cfg := models.AppConfig{
+		Server: models.ServerConfig{Address: "10.0.0.1/24"},
+		Peers: []models.Peer{{
+			ID: "p1", Enabled: true, AllowedIPs: "10.0.0.5/32",
+			ExitNodeID: "missing", StrictPolicyRouting: true,
+		}},
+	}
+	commands := strings.Join(GeneratePostUpCommands(cfg, models.GatewayNets(cfg.Server.Address, nil)), "\n")
+	if !strings.Contains(commands, "from 10.0.0.5 prohibit") {
+		t.Fatalf("invalid strict config falls through to main:\n%s", commands)
 	}
 }
 

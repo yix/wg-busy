@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"errors"
 	"fmt"
 	"io/fs"
 	"log"
@@ -12,6 +13,21 @@ import (
 	"github.com/yix/wg-busy/internal/wgstats"
 	"github.com/yix/wg-busy/internal/zerotier"
 )
+
+func applyError(err error) (*config.ApplyError, bool) {
+	var result *config.ApplyError
+	ok := errors.As(err, &result)
+	return result, ok
+}
+
+func renderApplyWarning(w http.ResponseWriter, err error) bool {
+	if _, ok := applyError(err); !ok {
+		return false
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	_ = templates.ExecuteTemplate(w, "toast-error", err.Error())
+	return true
+}
 
 type handler struct {
 	store *config.Store

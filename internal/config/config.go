@@ -1,8 +1,8 @@
 package config
 
 import (
+	"errors"
 	"fmt"
-	"log"
 	"os"
 	"path/filepath"
 	"sync"
@@ -21,6 +21,8 @@ type Store struct {
 	configPath   string
 	wgConfigPath string
 	config       models.AppConfig
+	routingState models.AppConfig
+	routingNets  []models.GatewayNet
 
 	// onChange is notified after a successful write. It must not block: it runs
 	// while the write lock is held, so anything slow (process control, HTTP)
@@ -31,6 +33,15 @@ type Store struct {
 	// Called while the store lock is held, so it must only read cached state.
 	ztGateways func() []models.GatewayNet
 }
+
+// ApplyError means persistence succeeded but one or more live services did not
+// converge. Callers must not retry the mutation as though it had been rejected.
+type ApplyError struct{ Err error }
+
+func (e *ApplyError) Error() string {
+	return "configuration saved but live apply failed: " + e.Err.Error()
+}
+func (e *ApplyError) Unwrap() error { return e.Err }
 
 // SetZeroTierGateways registers the provider of ZeroTier on-link networks used
 // when rendering policy routes into wg0.conf.
@@ -77,6 +88,7 @@ func Load(configPath, wgConfigPath string) (*Store, error) {
 			},
 			Peers: []models.Peer{},
 		}
+		s.routingState = s.config.Clone()
 		return s, nil
 	}
 	if err != nil {
@@ -86,6 +98,7 @@ func Load(configPath, wgConfigPath string) (*Store, error) {
 	if err := yaml.Unmarshal(data, &s.config); err != nil {
 		return nil, fmt.Errorf("parsing config: %w", err)
 	}
+	s.routingState = s.config.Clone()
 
 	return s, nil
 }
@@ -102,15 +115,17 @@ func (s *Store) Write(fn func(cfg *models.AppConfig) error) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	// Roll back on any failure, so a rejected edit never leaves the in-memory
-	// config diverged from disk (it would be persisted by the next successful write).
-	// ponytail: shallow copy is enough — mutations replace slices, never edit elements in place.
-	backup := s.config
-	backup.Peers = append([]models.Peer(nil), s.config.Peers...)
+	// Mutations may edit nested slice elements in place, so rollback needs an
+	// independent snapshot rather than a shallow struct copy.
+	backup := s.config.Clone()
 
 	if err := fn(&s.config); err != nil {
 		s.config = backup
 		return err
+	}
+	if errs := models.ValidateExitNodeRefs(s.config.Peers); len(errs) > 0 {
+		s.config = backup
+		return errs
 	}
 
 	if err := s.saveYAML(); err != nil {
@@ -120,15 +135,27 @@ func (s *Store) Write(fn func(cfg *models.AppConfig) error) error {
 
 	if err := s.renderWGConfig(); err != nil {
 		s.config = backup
+		if rollbackErr := s.saveYAML(); rollbackErr != nil {
+			return errors.Join(fmt.Errorf("rendering wg config: %w", err), fmt.Errorf("restoring YAML config: %w", rollbackErr))
+		}
 		return fmt.Errorf("rendering wg config: %w", err)
 	}
 
-	if err := bgp.Configure(&s.config); err != nil {
-		log.Printf("configuring bgp: %v", err)
-	}
-
-	if err := wireguard.ReloadWGConfig(); err != nil {
-		log.Printf("reloading wg server: %v", err)
+	currentNets := s.gatewayNets()
+	var applyErrs []error
+	running, reloadErr := wireguard.ReloadWGConfig()
+	if reloadErr != nil {
+		applyErrs = append(applyErrs, reloadErr)
+	} else if running {
+		if err := routing.Reconcile(s.routingState, s.routingNets, s.config, currentNets); err != nil {
+			applyErrs = append(applyErrs, err)
+		} else {
+			s.routingState = s.config.Clone()
+			s.routingNets = append([]models.GatewayNet(nil), currentNets...)
+		}
+		if err := bgp.Configure(&s.config); err != nil {
+			applyErrs = append(applyErrs, fmt.Errorf("configuring BGP: %w", err))
+		}
 	}
 
 	// After persistence, so a failure here can never trigger the rollback above.
@@ -136,20 +163,36 @@ func (s *Store) Write(fn func(cfg *models.AppConfig) error) error {
 		s.onChange(&s.config)
 	}
 
+	if len(applyErrs) > 0 {
+		return &ApplyError{Err: errors.Join(applyErrs...)}
+	}
 	return nil
+}
+
+// ReapplyBGP retries the desired BGP state after a WireGuard restart.
+func (s *Store) ReapplyBGP() error {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return bgp.Configure(&s.config)
 }
 
 // ReapplyRouting re-renders wg0.conf and converges the live routing state to it.
 // Called when a ZeroTier network comes up after wg0, whose routes and NAT rule
 // would otherwise sit uninstalled until the next manual apply.
 func (s *Store) ReapplyRouting() error {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
+	s.mu.Lock()
+	defer s.mu.Unlock()
 
 	if err := s.renderWGConfig(); err != nil {
 		return err
 	}
-	return routing.Apply(routing.GeneratePostUpCommands(s.config, s.gatewayNets()))
+	nets := s.gatewayNets()
+	if err := routing.Reconcile(s.routingState, s.routingNets, s.config, nets); err != nil {
+		return err
+	}
+	s.routingState = s.config.Clone()
+	s.routingNets = append([]models.GatewayNet(nil), nets...)
+	return nil
 }
 
 func (s *Store) saveYAML() error {

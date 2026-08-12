@@ -44,21 +44,21 @@ func GetBGPStats() *models.BGPStats {
 		Peers:   make([]models.BGPPeerStats, 0),
 	}
 
-	if bgpSrv == nil {
+	if active == nil {
 		return res
 	}
 
 	res.Running = true
-	res.RouterID = bnet.IPv4(bgpSrv.RouterID()).String()
-	res.ASN = localASN
+	res.RouterID = bnet.IPv4(active.server.RouterID()).String()
+	res.ASN = active.state.asn
 
-	metrics, err := bgpSrv.Metrics()
+	metrics, err := active.server.Metrics()
 	if err != nil || metrics == nil {
 		log.Printf("[BGP STATS] Metrics() returned err=%v metrics=%v", err, metrics)
 		return res
 	}
 
-	defVRF := vrfReg.GetVRFByName(vrf.DefaultVRFName)
+	defVRF := active.vrfs.GetVRFByName(vrf.DefaultVRFName)
 
 	for _, pm := range metrics.Peers {
 		stateStr := bgpStateToString(pm.State)
@@ -96,7 +96,7 @@ func GetBGPStats() *models.BGPStats {
 			locRIBv6 := defVRF.IPv6UnicastRIB()
 
 			// AFI 1 (IPv4), SAFI 1 (Unicast)
-			ribv4 := bgpSrv.GetRIBIn(defVRF, pm.IP, packet.AFIIPv4, packet.SAFIUnicast)
+			ribv4 := active.server.GetRIBIn(defVRF, pm.IP, packet.AFIIPv4, packet.SAFIUnicast)
 			if ribv4 != nil {
 				for _, r := range ribv4.Dump() {
 					status := "Filtered"
@@ -116,7 +116,7 @@ func GetBGPStats() *models.BGPStats {
 			}
 
 			// AFI 2 (IPv6), SAFI 1 (Unicast)
-			ribv6 := bgpSrv.GetRIBIn(defVRF, pm.IP, packet.AFIIPv6, packet.SAFIUnicast)
+			ribv6 := active.server.GetRIBIn(defVRF, pm.IP, packet.AFIIPv6, packet.SAFIUnicast)
 			if ribv6 != nil {
 				for _, r := range ribv6.Dump() {
 					status := "Filtered"

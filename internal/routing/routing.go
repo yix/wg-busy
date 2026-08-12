@@ -1,11 +1,22 @@
 package routing
 
 import (
+	"errors"
 	"fmt"
 	"os/exec"
 	"strings"
 
 	"github.com/yix/wg-busy/internal/models"
+)
+
+var (
+	interfaceUp = func() bool {
+		_, err := exec.Command("ip", "link", "show", models.WGDevice).Output()
+		return err == nil
+	}
+	runShellCommand = func(command string) ([]byte, error) {
+		return exec.Command("sh", "-c", command).CombinedOutput()
+	}
 )
 
 const routingTableBase uint = 100
@@ -60,14 +71,12 @@ func peerRules(cfg models.AppConfig, exitNodes map[string]models.Peer) []peerRul
 			continue
 		}
 		selector := "from " + peerIP
-		matched := false
 
 		// Exit node table, when this peer routes through one.
 		if p.ExitNodeID != "" {
 			if exitNode, ok := exitNodes[p.ExitNodeID]; ok {
 				rules = append(rules, peerRule{selector, fmt.Sprintf("table %d", exitNode.RoutingTableID), prio})
 				prio++
-				matched = true
 			}
 		}
 
@@ -75,13 +84,11 @@ func peerRules(cfg models.AppConfig, exitNodes map[string]models.Peer) []peerRul
 		if len(p.PolicyRoutes) > 0 && p.PolicyRoutingTableID > 0 {
 			rules = append(rules, peerRule{selector, fmt.Sprintf("table %d", p.PolicyRoutingTableID), prio})
 			prio++
-			matched = true
 		}
 
-		// Strict: anything the tables above did not match is rejected here rather
-		// than falling through to main. Validation guarantees there is a table to
-		// consult first, so this can never be the peer's only rule.
-		if p.StrictPolicyRouting && matched {
+		// Strict always fails closed. Validation normally guarantees a lookup
+		// first, but a hand-edited invalid config must never fall through to main.
+		if p.StrictPolicyRouting {
 			rules = append(rules, peerRule{selector, "prohibit", prio})
 			prio++
 		}
@@ -127,6 +134,12 @@ func zeroTierMasquerade(cfg models.AppConfig, add bool) []string {
 // cannot be installed now is installed by the next apply; losing the whole
 // interface is never the better failure.
 func policyRouteCmd(action, subnet, gateway string, table uint, gateways []models.GatewayNet) string {
+	if action == "del" {
+		// Deletion only needs the route key. Omitting the old gateway and device
+		// also makes cleanup work immediately after process startup, before the
+		// ZeroTier supervisor has rediscovered the interface that installed it.
+		return fmt.Sprintf("ip route del %s table %d || true", subnet, table)
+	}
 	dev := models.DeviceForGateway(gateway, gateways)
 	if dev == "" {
 		// ponytail: unknown gateway falls back to wg0 — validation rejects these,
@@ -163,11 +176,19 @@ func exitNodeRouteCmds(action string, exitNodes map[string]models.Peer) []string
 			continue
 		}
 		if exitNode.ExitNodeAllowAll {
-			cmds = append(cmds, fmt.Sprintf("ip route %s default via %s dev wg0 table %d", action, exitIP, exitNode.RoutingTableID))
+			cmd := fmt.Sprintf("ip route %s default via %s dev wg0 table %d", action, exitIP, exitNode.RoutingTableID)
+			if action == "del" {
+				cmd += " || true"
+			}
+			cmds = append(cmds, cmd)
 		} else {
 			for _, route := range exitNode.ExitNodeRoutes {
 				if route != "" {
-					cmds = append(cmds, fmt.Sprintf("ip route %s %s via %s dev wg0 table %d", action, route, exitIP, exitNode.RoutingTableID))
+					cmd := fmt.Sprintf("ip route %s %s via %s dev wg0 table %d", action, route, exitIP, exitNode.RoutingTableID)
+					if action == "del" {
+						cmd += " || true"
+					}
+					cmds = append(cmds, cmd)
 				}
 			}
 		}
@@ -226,22 +247,30 @@ func GeneratePostUpCommands(cfg models.AppConfig, gateways []models.GatewayNet) 
 	return append(cmds, policyRouteCmds("replace", cfg, gateways)...)
 }
 
-// Apply runs generated PostUp commands against the live system.
-//
-// Safe to call at any time: every command it generates is idempotent (rules
-// free their priority first, routes use replace, the NAT rule is check-then-add),
-// so this converges the kernel to the config without restarting the interface.
-// Used when a ZeroTier network comes up after wg0, which would otherwise leave
-// its routes uninstalled until the next manual apply.
-func Apply(cmds []string) error {
-	if _, err := exec.Command("ip", "link", "show", models.WGDevice).Output(); err != nil {
-		// No interface yet: PostUp will run these when it comes up.
-		return nil
-	}
+func applyCommands(cmds []string) error {
 	for _, cmd := range cmds {
-		if out, err := exec.Command("sh", "-c", cmd).CombinedOutput(); err != nil {
+		if out, err := runShellCommand(cmd); err != nil {
 			return fmt.Errorf("%s: %v: %s", cmd, err, strings.TrimSpace(string(out)))
 		}
+	}
+	return nil
+}
+
+// Reconcile removes the previously managed state before installing the next
+// state. If installation fails, it best-effort restores the previous state.
+func Reconcile(previous models.AppConfig, previousGateways []models.GatewayNet, next models.AppConfig, nextGateways []models.GatewayNet) error {
+	if !interfaceUp() {
+		return nil
+	}
+	if err := applyCommands(GeneratePostDownCommands(previous, previousGateways)); err != nil {
+		return fmt.Errorf("removing previous routing state: %w", err)
+	}
+	if err := applyCommands(GeneratePostUpCommands(next, nextGateways)); err != nil {
+		restoreErr := applyCommands(GeneratePostUpCommands(previous, previousGateways))
+		if restoreErr != nil {
+			return errors.Join(fmt.Errorf("installing new routing state: %w", err), fmt.Errorf("restoring previous routing state: %w", restoreErr))
+		}
+		return fmt.Errorf("installing new routing state: %w", err)
 	}
 	return nil
 }

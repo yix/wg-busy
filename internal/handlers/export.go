@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 	"os/exec"
@@ -89,6 +90,10 @@ func (h *handler) ApplyConfig(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		msg := fmt.Sprintf("Failed to apply config: %v\n%s", err, string(output))
 		_ = templates.ExecuteTemplate(w, "toast-error", msg)
+		return
+	}
+	if err := errors.Join(h.store.ReapplyRouting(), h.store.ReapplyBGP()); err != nil {
+		_ = templates.ExecuteTemplate(w, "toast-error", "WireGuard restarted, but dependent services did not fully apply: "+err.Error())
 		return
 	}
 

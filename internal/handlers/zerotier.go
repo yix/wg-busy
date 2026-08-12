@@ -233,9 +233,11 @@ func (h *handler) respondZeroTier(w http.ResponseWriter, r *http.Request, writeE
 		if ve, ok := writeErr.(models.ValidationErrors); ok {
 			data.ValidationErrors = ve
 			w.WriteHeader(http.StatusUnprocessableEntity)
+		} else if _, ok := applyError(writeErr); ok {
+			data.Error = writeErr.Error()
 		} else {
 			data.Error = writeErr.Error()
-			w.WriteHeader(http.StatusUnprocessableEntity)
+			w.WriteHeader(http.StatusInternalServerError)
 		}
 		_ = templates.ExecuteTemplate(w, "zerotier-tab", data)
 		return

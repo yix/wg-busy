@@ -244,6 +244,10 @@ func (h *handler) CreatePeer(w http.ResponseWriter, r *http.Request) {
 
 	if writeErr != nil {
 		logRejected(r, writeErr)
+		if renderApplyWarning(w, writeErr) {
+			h.listPeersOOB(w, r)
+			return
+		}
 		h.renderPeerFormError(w, peerFormData{IsNew: true, Peer: peer}, writeErr)
 		return
 	}
@@ -336,11 +340,16 @@ func (h *handler) UpdatePeer(w http.ResponseWriter, r *http.Request) {
 			return errs
 		}
 
+		submitted = *p
 		return nil
 	})
 
 	if writeErr != nil {
 		logRejected(r, writeErr)
+		if renderApplyWarning(w, writeErr) {
+			h.listPeersOOB(w, r)
+			return
+		}
 		if _, ok := writeErr.(models.ValidationErrors); !ok {
 			http.Error(w, writeErr.Error(), http.StatusInternalServerError)
 			return
@@ -378,8 +387,10 @@ func (h *handler) DeletePeer(w http.ResponseWriter, r *http.Request) {
 	})
 
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
+		if !renderApplyWarning(w, err) {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
 	}
 
 	// Return full peers list so the UI updates.
@@ -410,8 +421,10 @@ func (h *handler) TogglePeer(w http.ResponseWriter, r *http.Request) {
 	})
 
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
+		if !renderApplyWarning(w, err) {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
 	}
 
 	exitNodeName := ""
@@ -466,8 +479,10 @@ func (h *handler) RegeneratePeerKeys(w http.ResponseWriter, r *http.Request) {
 	})
 
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
+		if !renderApplyWarning(w, err) {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
 	}
 
 	// Return the edit form with updated data.

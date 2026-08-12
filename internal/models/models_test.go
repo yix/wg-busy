@@ -169,3 +169,52 @@ func TestValidPeerHasNoErrors(t *testing.T) {
 		t.Fatalf("expected no errors, got: %v", errs)
 	}
 }
+
+func TestAppConfigCloneIsIndependent(t *testing.T) {
+	original := AppConfig{
+		Peers: []Peer{{
+			ID: "p1", ExitNodeRoutes: []string{"10.0.0.0/8"},
+			AdvertisedRoutes: []string{"192.0.2.0/24"},
+			PolicyRoutes:     []string{"198.51.100.0/24 via 10.0.0.2"},
+			BGPRouteFilters:  []RouteFilter{{Prefix: "203.0.113.0/24"}},
+		}},
+		ZeroTier: ZeroTierConfig{Networks: []ZeroTierNetwork{{ID: "8056c2e21c000001", Name: "old"}}},
+	}
+	clone := original.Clone()
+	clone.Peers[0].ExitNodeRoutes[0] = "changed"
+	clone.Peers[0].AdvertisedRoutes[0] = "changed"
+	clone.Peers[0].PolicyRoutes[0] = "changed"
+	clone.Peers[0].BGPRouteFilters[0].Prefix = "changed"
+	clone.ZeroTier.Networks[0].Name = "changed"
+
+	if original.Peers[0].ExitNodeRoutes[0] == "changed" ||
+		original.Peers[0].AdvertisedRoutes[0] == "changed" ||
+		original.Peers[0].PolicyRoutes[0] == "changed" ||
+		original.Peers[0].BGPRouteFilters[0].Prefix == "changed" ||
+		original.ZeroTier.Networks[0].Name == "changed" {
+		t.Fatal("Clone shares mutable slices with the original")
+	}
+}
+
+func TestValidateExitNodeRefs(t *testing.T) {
+	tests := []struct {
+		name string
+		exit Peer
+		want bool
+	}{
+		{"enabled exit node", Peer{ID: "exit", Enabled: true, IsExitNode: true}, false},
+		{"disabled exit node", Peer{ID: "exit", Enabled: false, IsExitNode: true}, true},
+		{"ordinary peer", Peer{ID: "exit", Enabled: true}, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			peers := []Peer{{ID: "client", Enabled: true, ExitNodeID: "exit", StrictPolicyRouting: true}, tt.exit}
+			if got := len(ValidateExitNodeRefs(peers)) > 0; got != tt.want {
+				t.Fatalf("validation error = %v, want %v", got, tt.want)
+			}
+		})
+	}
+	if errs := ValidateExitNodeRefs([]Peer{{ID: "client", ExitNodeID: "missing"}}); !errs.HasField("exitNodeID") {
+		t.Fatalf("missing reference errors = %v, want exitNodeID", errs)
+	}
+}

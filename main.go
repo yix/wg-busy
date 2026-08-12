@@ -12,7 +12,6 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/yix/wg-busy/internal/bgp"
 	"github.com/yix/wg-busy/internal/config"
 	"github.com/yix/wg-busy/internal/handlers"
 	"github.com/yix/wg-busy/internal/models"
@@ -38,18 +37,21 @@ func main() {
 		log.Fatalf("loading config: %v", err)
 	}
 
-	// Generate server keys if not present.
-	if err := store.Write(func(cfg *models.AppConfig) error {
-		if cfg.Server.PrivateKey == "" {
+	// Generate server keys if not present. Avoid a no-op Store.Write on every
+	// startup: it applies live services, which must wait until wg0 is restarted.
+	var needsServerKey bool
+	store.Read(func(cfg *models.AppConfig) { needsServerKey = cfg.Server.PrivateKey == "" })
+	if needsServerKey {
+		if err := store.Write(func(cfg *models.AppConfig) error {
 			priv, _, err := wireguard.GenerateKeyPair()
 			if err != nil {
 				return err
 			}
 			cfg.Server.PrivateKey = priv
+			return nil
+		}); err != nil {
+			log.Fatalf("initializing server keys: %v", err)
 		}
-		return nil
-	}); err != nil {
-		log.Fatalf("initializing server keys: %v", err)
 	}
 
 	// Auto-start WireGuard.
@@ -65,11 +67,9 @@ func main() {
 		// BGP must start after wg0 is up so the listener can bind to the
 		// WireGuard interface IP. On failure we log and continue — the
 		// operator can save the server config via the UI to retry.
-		store.Read(func(cfg *models.AppConfig) {
-			if err := bgp.Configure(cfg); err != nil {
-				log.Printf("BGP configure error: %v", err)
-			}
-		})
+		if err := store.ReapplyBGP(); err != nil {
+			log.Printf("BGP configure error: %v", err)
+		}
 	}
 
 	// ZeroTier runs as a supervised child process. Configure only records the

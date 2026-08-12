@@ -175,9 +175,12 @@ func (s *Supervisor) notifyGatewayChange(nets []models.GatewayNet) {
 
 // Configure records the desired state. It never blocks on the service.
 func (s *Supervisor) Configure(cfg *models.AppConfig) {
+	desired := cfg.ZeroTier
+	desired.Networks = append([]models.ZeroTierNetwork(nil), cfg.ZeroTier.Networks...)
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.desired = cfg.ZeroTier
+	s.desired = desired
 	s.gen++
 }
 

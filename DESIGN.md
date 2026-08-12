@@ -250,8 +250,8 @@ ZeroTier interface. The same list drives validation, so an unreachable gateway i
 usable subnets listed. Routes over a `zt*` device are suffixed with `|| true`: those interfaces
 only exist once the network is authorized, and a missing one must not abort `wg-quick up`.
 
-Because these commands live in `wg0.conf`'s `PostUp`, a newly joined ZeroTier network's routes are
-applied on the next **Apply Config** (`wg syncconf` does not re-run `PostUp`).
+Because `wg syncconf` does not re-run `PostUp`, the store also reconciles these commands directly
+after every successful live WireGuard reload and whenever ZeroTier gateway networks change.
 
 ### NAT for ZeroTier egress
 
@@ -284,10 +284,11 @@ This is not defensive styling — each one has been observed to take WireGuard d
 whose ZeroTier gateway was not yet on-link fell back to `dev wg0`, failed with *"Nexthop has
 invalid gateway"*, and left the host with no `wg0` at all.
 
-Because the commands are idempotent, `Store.ReapplyRouting` can converge the live kernel state
-without restarting the interface. It runs when ZeroTier reports new on-link networks, so a network
-that comes up after wg0 gets its routes and NAT rule immediately instead of waiting for a manual
-**Apply Config**.
+The store remembers the last successfully applied config and gateway set. Reconciliation runs the
+previous `PostDown` commands before the new `PostUp` commands, so rules and routes that disappear
+from the config are removed instead of lingering in the kernel. If installation fails, the old
+`PostUp` state is restored best-effort. `Store.ReapplyRouting` uses the same path when ZeroTier
+reports new on-link networks.
 
 ### Strict Policy Routing
 
@@ -309,18 +310,37 @@ repeated applies cannot accumulate duplicate rules.
 
 A strict peer that also uses an exit node keeps both lookups (exit node, then policy table) before
 the reject. `prohibit` is used rather than `blackhole` so the client fails fast with an
-administratively-prohibited error instead of hanging. Validation requires at least one policy route
-or an exit node, since strict mode with nothing to match would block the peer entirely.
+administratively-prohibited error instead of hanging. Store-level validation requires the selected
+exit node to exist, be enabled, and be marked as an exit node. The generator still emits `prohibit`
+for an invalid hand-edited strict config, failing closed rather than leaking traffic through `main`.
 
 ## Config Persistence: YAML → .conf
 
 Source of truth: `config.yaml`. On every mutation:
-1. Save `config.yaml` atomically (write .tmp, rename)
-2. Generate routing commands via routing module
-3. Render `wg0.conf` (user PostUp/Down + routing commands + peer sections with AllowedIPs overrides)
-4. Write `wg0.conf` atomically
+1. Clone the complete config, including nested slices, for rollback and live-state reconciliation
+2. Apply the mutation and validate cross-peer exit-node references
+3. Save `config.yaml` and render `wg0.conf` atomically (write `.tmp`, rename); restore YAML on render failure
+4. Reload WireGuard with direct `wg-quick strip` → `wg syncconf` commands (no shell process substitution)
+5. Reconcile previous routing state to the new state and configure BGP
+6. Notify the asynchronous ZeroTier supervisor
 
-"Apply" only reloads WireGuard — the .conf is already on disk.
+Persistence errors roll back the mutation. A live service failure returns a typed `ApplyError`:
+the UI reports that configuration was saved but not fully applied and renders the persisted state,
+so resubmitting cannot duplicate a create/delete operation. **Apply Config** restarts WireGuard and
+then retries routing and BGP reconciliation.
+
+## BGP Runtime Lifecycle
+
+BGP runtime state owns the `bio-rd` server, VRF registry, kernel route client, a closeable listener
+manager, and the active Router ID/ASN/listen address/listen port. Startup builds these as a local
+candidate and publishes it only after kernel registration and peer/listener creation succeed.
+Failures dispose the candidate and leave BGP stopped and retryable.
+
+Changing any restart-sensitive server field shuts down the active runtime and starts a new one.
+The app supplies a small `bio-rd` listener manager because the dependency's built-in manager has no
+close API; this releases TCP sockets on disable and rebind. Peer add/replace and filter errors are
+returned to the store instead of being logged as successful. The dashboard reports Running only
+when a fully initialized runtime is published.
 
 ## API Endpoints
 
