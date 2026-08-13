@@ -113,22 +113,53 @@ func peerRules(cfg models.AppConfig, exitNodes map[string]models.Peer) []peerRul
 // after wg0 came up, so the rule never needs to know device names.
 const masqueradeSpec = "POSTROUTING -o zt+ -j MASQUERADE"
 
-// zeroTierMasquerade returns the NAT commands for ZeroTier egress.
+// zeroTierMasquerade returns the NAT commands for ZeroTier egress. Optional
+// ACCEPT rules are inserted before MASQUERADE so advertised networks retain
+// their original source addresses.
 // add=false renders the teardown.
 func zeroTierMasquerade(cfg models.AppConfig, add bool) []string {
 	if !cfg.ZeroTier.Enabled || cfg.ZeroTier.DisableMasquerade {
 		return nil
 	}
+
+	var specs []string
+	if cfg.ZeroTier.ExcludeAdvertisedRoutesFromMasquerade {
+		seen := make(map[string]bool)
+		for _, peer := range cfg.Peers {
+			if !peer.Enabled {
+				continue
+			}
+			for _, advertised := range peer.AdvertisedRoutes {
+				ip, network, err := net.ParseCIDR(strings.TrimSpace(advertised))
+				if err != nil || ip.To4() == nil || seen[network.String()] {
+					continue
+				}
+				seen[network.String()] = true
+				specs = append(specs, fmt.Sprintf("-s %s -o zt+ -j ACCEPT", network.String()))
+			}
+		}
+	}
+
+	var commands []string
 	if add {
+		for _, spec := range specs {
+			commands = append(commands, fmt.Sprintf(
+				"iptables -t nat -C POSTROUTING %s 2>/dev/null || iptables -t nat -I POSTROUTING 1 %s",
+				spec, spec))
+		}
 		// Check-then-add: applying twice must not stack duplicate rules, and a
 		// PostDown that never ran (see ApplyConfig) would otherwise leave one behind.
-		return []string{fmt.Sprintf(
+		return append(commands, fmt.Sprintf(
 			"iptables -t nat -C %s 2>/dev/null || iptables -t nat -A %s",
-			masqueradeSpec, masqueradeSpec)}
+			masqueradeSpec, masqueradeSpec))
 	}
 	// Never fail the teardown if the rule is already gone: wg-quick runs hooks
 	// under set -e, and an aborted down leaves the interface half torn down.
-	return []string{fmt.Sprintf("iptables -t nat -D %s || true", masqueradeSpec)}
+	commands = append(commands, fmt.Sprintf("iptables -t nat -D %s || true", masqueradeSpec))
+	for _, spec := range specs {
+		commands = append(commands, fmt.Sprintf("iptables -t nat -D POSTROUTING %s || true", spec))
+	}
+	return commands
 }
 
 // policyRouteCmd renders one policy route. The gateway decides the interface:

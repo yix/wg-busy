@@ -537,6 +537,11 @@ var templates = template.Must(template.New("").Funcs(template.FuncMap{
                 Masquerade WireGuard traffic over ZeroTier
             </label>
             <small>Disable this when the ZeroTier network already has a route back to the WireGuard subnet.</small>
+            <label>
+                <input type="checkbox" name="ztExcludeAdvertisedRoutesFromMasquerade" {{if .Config.ExcludeAdvertisedRoutesFromMasquerade}}checked{{end}}>
+                Exclude advertised networks from masquerade
+            </label>
+            <small>Adds NAT bypass rules for enabled peers' advertised IPv4 networks. The ZeroTier network must have routes back to them.</small>
         </fieldset>
         <div class="grid">
             <label>

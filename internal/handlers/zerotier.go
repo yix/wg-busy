@@ -150,6 +150,7 @@ func (h *handler) UpdateZeroTier(w http.ResponseWriter, r *http.Request) {
 		cfg.ZeroTier.Enabled = enabled
 		cfg.ZeroTier.Port = uint16(port)
 		cfg.ZeroTier.DisableMasquerade = r.FormValue("ztMasquerade") != "on"
+		cfg.ZeroTier.ExcludeAdvertisedRoutesFromMasquerade = r.FormValue("ztExcludeAdvertisedRoutesFromMasquerade") == "on"
 		if errs := cfg.ZeroTier.Validate(); len(errs) > 0 {
 			return errs
 		}

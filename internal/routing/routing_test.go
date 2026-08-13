@@ -357,6 +357,39 @@ func TestZeroTierMasquerade(t *testing.T) {
 	}
 }
 
+func TestZeroTierMasqueradeBypassesAdvertisedNetworksFirst(t *testing.T) {
+	cfg := models.AppConfig{
+		ZeroTier: models.ZeroTierConfig{
+			Enabled:                               true,
+			ExcludeAdvertisedRoutesFromMasquerade: true,
+		},
+		Peers: []models.Peer{
+			{Enabled: true, AdvertisedRoutes: []string{"192.0.2.7/24", "192.0.2.0/24", "2001:db8::/64"}},
+			{Enabled: false, AdvertisedRoutes: []string{"198.51.100.0/24"}},
+		},
+	}
+
+	up := strings.Join(GeneratePostUpCommands(cfg, nil), "\n")
+	accept := "iptables -t nat -I POSTROUTING 1 -s 192.0.2.0/24 -o zt+ -j ACCEPT"
+	masquerade := "iptables -t nat -A POSTROUTING -o zt+ -j MASQUERADE"
+	if strings.Count(up, accept) != 1 {
+		t.Fatalf("advertised network bypass rule count = %d, want 1:\n%s", strings.Count(up, accept), up)
+	}
+	if strings.Index(up, accept) > strings.Index(up, masquerade) {
+		t.Fatalf("advertised network bypass is after masquerade:\n%s", up)
+	}
+	for _, excluded := range []string{"2001:db8::/64", "198.51.100.0/24"} {
+		if strings.Contains(up, excluded) {
+			t.Errorf("unexpected bypass for %s:\n%s", excluded, up)
+		}
+	}
+
+	down := strings.Join(GeneratePostDownCommands(cfg, nil), "\n")
+	if !strings.Contains(down, "iptables -t nat -D POSTROUTING -s 192.0.2.0/24 -o zt+ -j ACCEPT || true") {
+		t.Fatalf("advertised network bypass is never removed:\n%s", down)
+	}
+}
+
 // Policy routes do not depend on exit nodes; a config with only policy routes
 // must still produce commands.
 func TestPolicyRoutesWithoutExitNode(t *testing.T) {

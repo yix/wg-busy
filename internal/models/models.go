@@ -40,10 +40,11 @@ func (c AppConfig) Clone() AppConfig {
 
 // ZeroTierConfig is the desired state of the local ZeroTier client.
 type ZeroTierConfig struct {
-	Enabled           bool              `yaml:"enabled,omitempty"`
-	Port              uint16            `yaml:"port,omitempty"` // primary port, 0 means the default 9993
-	DisableMasquerade bool              `yaml:"disableMasquerade,omitempty"`
-	Networks          []ZeroTierNetwork `yaml:"networks,omitempty"`
+	Enabled                               bool              `yaml:"enabled,omitempty"`
+	Port                                  uint16            `yaml:"port,omitempty"` // primary port, 0 means the default 9993
+	DisableMasquerade                     bool              `yaml:"disableMasquerade,omitempty"`
+	ExcludeAdvertisedRoutesFromMasquerade bool              `yaml:"excludeAdvertisedRoutesFromMasquerade,omitempty"`
+	Networks                              []ZeroTierNetwork `yaml:"networks,omitempty"`
 }
 
 // ZeroTierNetwork is a network the client should be joined to.
