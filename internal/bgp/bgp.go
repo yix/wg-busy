@@ -29,6 +29,7 @@ var (
 	newKernel          = kernel.New
 	newBGPServer       = server.NewBGPServer
 	interfaceAddresses = systemInterfaceAddresses
+	peerLocalAddress   = routeLocalAddress
 	// ztAddressProvider reports the node's own addresses on joined ZeroTier
 	// networks, so the BGP listener can also bind to them. Set via
 	// SetZeroTierAddressProvider; nil until wired up (e.g. in tests).
@@ -251,7 +252,17 @@ func buildPeerConfig(cfg *models.AppConfig, defVRF *vrf.VRF, routerID uint32, na
 		AdvertiseIPv4MultiProtocol: true, // Required to negotiate IPv4 AFI over IPv6 sessions
 	}
 
-	if cfg.Server.BGPListenAddress != "" {
+	if redistributeConnected {
+		localAddress, err := peerLocalAddress(peerIP)
+		if err != nil {
+			return bnet.IP{}, server.PeerConfig{}, fmt.Errorf("peer %q: determine local BGP session address: %w", name, err)
+		}
+		lA, err := bnet.IPFromString(localAddress)
+		if err != nil {
+			return bnet.IP{}, server.PeerConfig{}, fmt.Errorf("peer %q: invalid local BGP session address %q: %w", name, localAddress, err)
+		}
+		peerCfg.LocalAddress = lA.Dedup()
+	} else if cfg.Server.BGPListenAddress != "" {
 		if lA, err := bnet.IPFromString(cfg.Server.BGPListenAddress); err == nil {
 			peerCfg.LocalAddress = &lA
 		} else {
@@ -270,7 +281,7 @@ func buildPeerConfig(cfg *models.AppConfig, defVRF *vrf.VRF, routerID uint32, na
 	peerCfg.PeerAddress = peerCfg.PeerAddress.Dedup()
 
 	importFilter := prependMaxPrefixLengthFilter(buildFilterChain("import", routeFilters), "received", maxReceivedPrefixLength)
-	exportFilter := buildExportFilterChain(exportFilters, redistributeConnected, maxAdvertisedPrefixLength, localPrefixes)
+	exportFilter := buildExportFilterChain(exportFilters, redistributeConnected, maxAdvertisedPrefixLength, localPrefixes, peerCfg.LocalAddress)
 
 	afi := &server.AddressFamilyConfig{
 		ImportFilterChain: importFilter,
@@ -286,6 +297,31 @@ func buildPeerConfig(cfg *models.AppConfig, defVRF *vrf.VRF, routerID uint32, na
 		name, bPeerIP.String(), cfg.Server.BGPASN, peerASN, len(routeFilters))
 
 	return bPeerIP, peerCfg, nil
+}
+
+// routeLocalAddress asks the kernel which source address it would use to
+// reach a peer. Connecting a UDP socket performs the route lookup without
+// sending any traffic.
+func routeLocalAddress(peerIP string) (string, error) {
+	ip := net.ParseIP(peerIP)
+	if ip == nil {
+		return "", fmt.Errorf("invalid peer IP %q", peerIP)
+	}
+	network := "udp6"
+	if ip.To4() != nil {
+		network = "udp4"
+	}
+	conn, err := net.DialUDP(network, nil, &net.UDPAddr{IP: ip, Port: 179})
+	if err != nil {
+		return "", err
+	}
+	defer conn.Close()
+
+	local, ok := conn.LocalAddr().(*net.UDPAddr)
+	if !ok || local.IP == nil || local.IP.IsUnspecified() {
+		return "", fmt.Errorf("kernel returned no usable source address for %s", peerIP)
+	}
+	return local.IP.String(), nil
 }
 
 func reconcilePeers(runtime *bgpRuntime, cfg *models.AppConfig, localPrefixes []string) error {
@@ -462,10 +498,16 @@ func buildFilterChain(kind string, filters []models.RouteFilter) filter.Chain {
 	return filter.Chain{filter.NewFilter(kind+"-filter", terms)}
 }
 
-func buildExportFilterChain(filters []models.RouteFilter, redistributeConnected bool, maxPrefixLength uint16, localPrefixes []string) filter.Chain {
+func buildExportFilterChain(filters []models.RouteFilter, redistributeConnected bool, maxPrefixLength uint16, localPrefixes []string, localNextHop *bnet.IP) filter.Chain {
 	chain := prependMaxPrefixLengthFilter(buildFilterChain("export", filters), "advertised", maxPrefixLength)
 	if redistributeConnected {
-		return chain
+		if localNextHop == nil {
+			return chain
+		}
+		nextHopSelf := filter.NewFilter("redistributed-next-hop-self", []*filter.Term{
+			filter.NewTerm("set-local-session-address", nil, []actions.Action{newRedistributedNextHopAction(localNextHop)}),
+		})
+		return append(filter.Chain{nextHopSelf}, chain...)
 	}
 
 	terms := make([]*filter.Term, 0, len(localPrefixes))
@@ -486,6 +528,28 @@ func buildExportFilterChain(filters []models.RouteFilter, redistributeConnected 
 	}
 	rejectConnected := filter.NewFilter("reject-local-connected", terms)
 	return append(filter.Chain{rejectConnected}, chain...)
+}
+
+type redistributedNextHopAction struct {
+	nextHop *bnet.IP
+}
+
+func newRedistributedNextHopAction(nextHop *bnet.IP) *redistributedNextHopAction {
+	return &redistributedNextHopAction{nextHop: nextHop.Dedup()}
+}
+
+func (a *redistributedNextHopAction) Do(_ *bnet.Prefix, path *route.Path) actions.Result {
+	if path == nil || !path.IsRedistributed() {
+		return actions.Result{Path: path}
+	}
+	modified := path.Copy()
+	modified.SetNextHop(a.nextHop)
+	return actions.Result{Path: modified}
+}
+
+func (a *redistributedNextHopAction) Equal(other actions.Action) bool {
+	b, ok := other.(*redistributedNextHopAction)
+	return ok && a.nextHop == b.nextHop
 }
 
 func prependMaxPrefixLengthFilter(chain filter.Chain, kind string, max uint16) filter.Chain {

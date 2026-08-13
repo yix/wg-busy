@@ -161,6 +161,10 @@ func TestRouteFilterChangeRequiresDurablePeerReplacement(t *testing.T) {
 }
 
 func TestRedistributeConnectedChangeRequiresDurablePeerReplacement(t *testing.T) {
+	originalLocalAddress := peerLocalAddress
+	peerLocalAddress = func(string) (string, error) { return "10.0.0.1", nil }
+	t.Cleanup(func() { peerLocalAddress = originalLocalAddress })
+
 	registry := vrf.NewVRFRegistry()
 	defVRF := registry.CreateVRFIfNotExists(vrf.DefaultVRFName, 0)
 	cfg := &models.AppConfig{
@@ -195,13 +199,42 @@ func TestExportFilterAllowsLocalRoutesOnlyWhenEnabled(t *testing.T) {
 		t.Fatal(err)
 	}
 	localPath := &route.Path{Type: route.StaticPathType}
+	localNextHop, _ := bnet.IPFromString("10.0.0.1")
 
 	localPrefixes := []string{"10.0.0.0/24"}
-	if _, rejected := buildExportFilterChain(nil, false, 0, localPrefixes).Process(prefix, localPath); !rejected {
+	if _, rejected := buildExportFilterChain(nil, false, 0, localPrefixes, localNextHop.Dedup()).Process(prefix, localPath); !rejected {
 		t.Fatal("local route was exported without per-peer redistribution enabled")
 	}
-	if _, rejected := buildExportFilterChain(nil, true, 0, localPrefixes).Process(prefix, localPath); rejected {
+	if _, rejected := buildExportFilterChain(nil, true, 0, localPrefixes, localNextHop.Dedup()).Process(prefix, localPath); rejected {
 		t.Fatal("local route was rejected with per-peer redistribution enabled")
+	}
+}
+
+func TestExportFilterSetsSessionNextHopOnlyOnRedistributedRoutes(t *testing.T) {
+	prefix, _ := bnet.PrefixFromString("10.8.0.0/24")
+	localNextHop, _ := bnet.IPFromString("10.0.0.1")
+	originalNextHop, _ := bnet.IPFromString("192.0.2.1")
+	chain := buildExportFilterChain(nil, true, 0, []string{prefix.String()}, localNextHop.Dedup())
+
+	for _, test := range []struct {
+		name              string
+		redistributedFrom uint8
+		want              string
+	}{
+		{name: "locally originated", redistributedFrom: route.StaticPathType, want: localNextHop.String()},
+		{name: "transit BGP", want: originalNextHop.String()},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			path := &route.Path{Type: route.BGPPathType, RedistributedFrom: test.redistributedFrom, BGPPath: route.NewBGPPath()}
+			path.SetNextHop(originalNextHop.Dedup())
+			got, rejected := chain.Process(prefix, path)
+			if rejected {
+				t.Fatal("route was unexpectedly rejected")
+			}
+			if got.NextHop().String() != test.want {
+				t.Fatalf("next hop = %s, want %s", got.NextHop(), test.want)
+			}
+		})
 	}
 }
 
@@ -209,7 +242,7 @@ func TestMaxPrefixLengthIsInclusiveForReceivedAndAdvertisedRoutes(t *testing.T) 
 	path := &route.Path{Type: route.BGPPathType}
 	filters := []models.RouteFilter{{Prefix: "0.0.0.0/0", Matcher: "orlonger", Action: "accept"}}
 	received := prependMaxPrefixLengthFilter(buildFilterChain("import", filters), "received", 24)
-	advertised := buildExportFilterChain(filters, true, 24, nil)
+	advertised := buildExportFilterChain(filters, true, 24, nil, nil)
 
 	for _, test := range []struct {
 		prefix string
