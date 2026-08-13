@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"net"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -26,13 +27,31 @@ var (
 	active       *bgpRuntime
 	newKernel    = kernel.New
 	newBGPServer = server.NewBGPServer
+	// ztAddressProvider reports the node's own addresses on joined ZeroTier
+	// networks, so the BGP listener can also bind to them. Set via
+	// SetZeroTierAddressProvider; nil until wired up (e.g. in tests).
+	ztAddressProvider func() []models.GatewayNet
 )
+
+// SetZeroTierAddressProvider registers the callback used to look up the
+// node's own ZeroTier interface addresses, so BGP can also listen on them
+// when a specific (non-wildcard) BGP listen address is configured. Without
+// this, a BGP peer reachable only over a ZeroTier network could never dial in.
+func SetZeroTierAddressProvider(fn func() []models.GatewayNet) {
+	mu.Lock()
+	defer mu.Unlock()
+	ztAddressProvider = fn
+}
 
 type bgpServerState struct {
 	routerID      uint32
 	asn           uint32
 	listenAddress string
 	listenPort    uint16
+	// extraListen is a comma-joined, sorted list of additional host IPs to
+	// listen on (currently: ZeroTier addresses). Kept as a string so
+	// bgpServerState stays comparable with ==.
+	extraListen string
 }
 
 type bgpRuntime struct {
@@ -100,7 +119,41 @@ func stateFor(cfg models.ServerConfig, routerID uint32) bgpServerState {
 	if address == "" {
 		address = "::"
 	}
-	return bgpServerState{routerID: routerID, asn: cfg.BGPASN, listenAddress: address, listenPort: cfg.BGPListenPort}
+	return bgpServerState{
+		routerID:      routerID,
+		asn:           cfg.BGPASN,
+		listenAddress: address,
+		listenPort:    cfg.BGPListenPort,
+		extraListen:   strings.Join(extraListenHosts(address), ","),
+	}
+}
+
+// extraListenHosts returns the additional host IPs the BGP listener should
+// bind to besides the primary listen address — the node's own ZeroTier
+// interface addresses, so a peer reachable only over ZeroTier can still
+// dial in. Skipped when the primary address is already a wildcard, since
+// that already covers every interface including ZeroTier's.
+func extraListenHosts(primary string) []string {
+	if primary == "::" || primary == "0.0.0.0" || ztAddressProvider == nil {
+		return nil
+	}
+
+	seen := map[string]bool{primary: true}
+	var hosts []string
+	for _, n := range ztAddressProvider() {
+		ip, _, err := net.ParseCIDR(strings.TrimSpace(n.CIDR))
+		if err != nil {
+			continue
+		}
+		host := ip.String()
+		if seen[host] {
+			continue
+		}
+		seen[host] = true
+		hosts = append(hosts, host)
+	}
+	sort.Strings(hosts)
+	return hosts
 }
 
 func desiredPeers(cfg *models.AppConfig, defVRF *vrf.VRF, routerID uint32) (map[bnet.IP]server.PeerConfig, error) {
@@ -272,9 +325,18 @@ func startRuntime(cfg *models.AppConfig, state bgpServerState) (*bgpRuntime, err
 	defVRF.IPv4UnicastRIB().Register(kernelRoutes)
 	defVRF.IPv6UnicastRIB().Register(kernelRoutes)
 
-	listenAddress := net.JoinHostPort(state.listenAddress, fmt.Sprint(state.listenPort))
+	listenAddrs := []string{net.JoinHostPort(state.listenAddress, fmt.Sprint(state.listenPort))}
+	for _, host := range strings.Split(state.extraListen, ",") {
+		if host == "" {
+			continue
+		}
+		listenAddrs = append(listenAddrs, net.JoinHostPort(host, fmt.Sprint(state.listenPort)))
+	}
+	if len(listenAddrs) > 1 {
+		log.Printf("[BGP] Listening on %d addresses (including ZeroTier): %v", len(listenAddrs), listenAddrs)
+	}
 	listenAddrsByVRF := map[string][]string{
-		vrf.DefaultVRFName: {listenAddress},
+		vrf.DefaultVRFName: listenAddrs,
 	}
 	listeners := newListenerManager(listenAddrsByVRF)
 	srvCfg := server.BGPServerConfig{

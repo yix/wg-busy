@@ -34,6 +34,37 @@ func TestServerStateIncludesEveryRestartSensitiveSetting(t *testing.T) {
 	}
 }
 
+func TestExtraListenHostsIncludesZeroTierAddressesUnlessWildcard(t *testing.T) {
+	mu.Lock()
+	original := ztAddressProvider
+	ztAddressProvider = func() []models.GatewayNet {
+		return []models.GatewayNet{
+			{Device: "zt0", CIDR: "10.147.17.2/24"},
+			{Device: "zt1", CIDR: "10.147.18.2/24"},
+			{Device: "zt1", CIDR: "10.147.18.2/24"}, // duplicate, must be deduped
+			{Device: "zt2", CIDR: "not-a-cidr"},     // malformed, must be skipped
+		}
+	}
+	mu.Unlock()
+	t.Cleanup(func() {
+		mu.Lock()
+		ztAddressProvider = original
+		mu.Unlock()
+	})
+
+	got := extraListenHosts("10.0.0.1")
+	want := []string{"10.147.17.2", "10.147.18.2"}
+	if len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
+		t.Fatalf("extraListenHosts(%q) = %v, want %v", "10.0.0.1", got, want)
+	}
+
+	for _, wildcard := range []string{"::", "0.0.0.0"} {
+		if got := extraListenHosts(wildcard); got != nil {
+			t.Fatalf("extraListenHosts(%q) = %v, want nil (wildcard already covers every interface)", wildcard, got)
+		}
+	}
+}
+
 func TestDesiredPeersRejectsUnsupportedRuntimeIdentity(t *testing.T) {
 	registry := vrf.NewVRFRegistry()
 	defVRF := registry.CreateVRFIfNotExists(vrf.DefaultVRFName, 0)

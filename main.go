@@ -12,6 +12,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/yix/wg-busy/internal/bgp"
 	"github.com/yix/wg-busy/internal/config"
 	"github.com/yix/wg-busy/internal/handlers"
 	"github.com/yix/wg-busy/internal/models"
@@ -87,11 +88,18 @@ func main() {
 	// Policy routes may use a ZeroTier peer IP as their gateway, so wg0.conf
 	// rendering needs to know which subnets are on-link over which zt device.
 	store.SetZeroTierGateways(zt.GatewayNets)
+	// BGP should also accept sessions from peers reachable only over ZeroTier,
+	// so it needs to know the node's own addresses on joined networks too.
+	bgp.SetZeroTierAddressProvider(zt.GatewayNets)
 	// A network coming up changes which interface those routes belong on, so
 	// re-render wg0.conf when that happens rather than waiting for the next save.
+	// The BGP listener set depends on the same addresses, so reapply it too.
 	zt.OnGatewaysChanged(func() {
 		if err := store.ReapplyRouting(); err != nil {
 			log.Printf("applying routing after ZeroTier change: %v", err)
+		}
+		if err := store.ReapplyBGP(); err != nil {
+			log.Printf("applying BGP after ZeroTier change: %v", err)
 		}
 	})
 	store.Read(func(cfg *models.AppConfig) { zt.Configure(cfg) })
