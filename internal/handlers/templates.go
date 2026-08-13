@@ -315,7 +315,8 @@ var templates = template.Must(template.New("").Funcs(template.FuncMap{
                     </div>
                     
                     <div style="margin-top: 1rem;">
-                        <label>Route Filters</label>
+                        <label>Received Prefix Filters</label>
+                        <small>Controls which prefixes received from this peer are accepted. Leave empty to accept everything.</small>
                         <div id="bgp-route-filters-list">
                             {{range $i, $filter := .Peer.BGPRouteFilters}}
                             <div class="route-filter-row" style="display:flex; gap:0.5rem; margin-bottom:0.5rem;">
@@ -333,6 +334,28 @@ var templates = template.Must(template.New("").Funcs(template.FuncMap{
                             {{end}}
                         </div>
                         <button type="button" class="btn btn-outline secondary" style="width:auto; margin-top:0.5rem;" onclick="addRouteFilterRow()">+ Add Filter</button>
+                    </div>
+
+                    <div style="margin-top: 1rem;">
+                        <label>Advertised Prefix Filters</label>
+                        <small>Controls which locally known prefixes are advertised to this peer. Leave empty to advertise everything.</small>
+                        <div id="bgp-export-filters-list">
+                            {{range $i, $filter := .Peer.BGPExportFilters}}
+                            <div class="route-filter-row" style="display:flex; gap:0.5rem; margin-bottom:0.5rem;">
+                                <input type="text" name="exportFilterPrefix[]" value="{{$filter.Prefix}}" placeholder="Prefix (e.g. 10.1.0.0/16)" style="flex:1">
+                                <select name="exportFilterMatcher[]" style="width:auto">
+                                    <option value="exact" {{if eq $filter.Matcher "exact"}}selected{{end}}>Exact</option>
+                                    <option value="orlonger" {{if eq $filter.Matcher "orlonger"}}selected{{end}}>Or Longer</option>
+                                </select>
+                                <select name="exportFilterAction[]" style="width:auto">
+                                    <option value="accept" {{if eq $filter.Action "accept"}}selected{{end}}>Accept</option>
+                                    <option value="reject" {{if eq $filter.Action "reject"}}selected{{end}}>Reject</option>
+                                </select>
+                                <button type="button" class="btn btn-outline-danger" style="width:auto" onclick="this.closest('.route-filter-row').remove()">X</button>
+                            </div>
+                            {{end}}
+                        </div>
+                        <button type="button" class="btn btn-outline secondary" style="width:auto; margin-top:0.5rem;" onclick="addRouteFilterRow('bgp-export-filters-list', 'exportFilter')">+ Add Filter</button>
                     </div>
                 </div>
             </fieldset>
@@ -702,11 +725,143 @@ var templates = template.Must(template.New("").Funcs(template.FuncMap{
 {{end}}
 {{end}}
 
+{{define "bgp-custom-peers"}}
+<div id="bgp-custom-peers-list" {{if .OOB}}hx-swap-oob="true"{{end}}>
+    <div class="header-row">
+        <h3>Custom BGP Peers</h3>
+        <button class="btn btn-primary" style="width:auto" hx-get="bgp/peers/new" hx-target="#modal-container" hx-swap="innerHTML">+ Add Peer</button>
+    </div>
+    {{if not .Peers}}
+    <p><small class="text-muted">No standalone BGP peers configured. A WireGuard peer can also enable BGP from its own edit form.</small></p>
+    {{else}}
+    {{range .Peers}}
+    <article class="flex-row" style="align-items:center;">
+        <div>
+            <strong>{{.Name}}</strong> {{if not .Enabled}}<span class="badge badge-warn">Disabled</span>{{end}}
+            <div><small class="text-muted">{{.PeerIP}} (AS{{.PeerASN}}) &middot; {{if .Connect}}active{{else}}passive{{end}}{{if .RouteFilters}} &middot; {{len .RouteFilters}} received filter(s){{end}}{{if .ExportFilters}} &middot; {{len .ExportFilters}} advertised filter(s){{end}}</small></div>
+        </div>
+        <div class="btn-group">
+            <button class="btn btn-outline" style="width:auto" hx-get="bgp/peers/{{.ID}}/edit" hx-target="#modal-container" hx-swap="innerHTML">Edit</button>
+            <button class="btn btn-outline-danger" style="width:auto" hx-delete="bgp/peers/{{.ID}}" hx-target="#tab-content" hx-swap="innerHTML" hx-confirm="Delete BGP peer {{.Name}}?">Delete</button>
+        </div>
+    </article>
+    {{end}}
+    {{end}}
+</div>
+{{end}}
+
+{{define "bgp-peer-form"}}
+<dialog>
+    <article>
+        <header class="flex-row">
+            <p class="mb-0"><strong>{{if .IsNew}}Add BGP Peer{{else}}Edit BGP Peer{{end}}</strong></p>
+            <button aria-label="Close" class="btn btn-outline secondary mb-0" style="padding: 0.1rem 0.6rem" onclick="closeModal()">X</button>
+        </header>
+        <form {{if .IsNew}}hx-post="bgp/peers"{{else}}hx-put="bgp/peers/{{.Peer.ID}}"{{end}}
+              hx-target="#modal-container" hx-swap="innerHTML">
+
+            {{if .Error}}<div class="toast toast-error" role="alert">{{.Error}}</div>{{end}}
+            {{template "error-summary" .ValidationErrors}}
+
+            <label>
+                Name *
+                <input type="text" name="name" value="{{.Peer.Name}}" required maxlength="64"
+                       placeholder="e.g. Route Reflector"
+                       {{if .ValidationErrors.HasField "name"}}aria-invalid="true"{{end}}>
+                {{range .ValidationErrors}}{{if eq .Field "name"}}<small class="field-error">{{.Message}}</small>{{end}}{{end}}
+            </label>
+
+            <input type="hidden" name="bgpEnabled" value="on">
+            <label>
+                <input type="checkbox" name="bgpConnect" {{if .Peer.Connect}}checked{{end}} title="Actively initiate connection to the peer"> Connect
+            </label>
+
+            <div class="grid">
+                <label>
+                    Peer BGP IP *
+                    <input type="text" name="bgpPeerIP" value="{{.Peer.PeerIP}}" placeholder="10.0.0.123" {{if .ValidationErrors.HasField "bgpPeerIP"}}aria-invalid="true"{{end}}>
+                    {{range .ValidationErrors}}{{if eq .Field "bgpPeerIP"}}<small class="field-error">{{.Message}}</small>{{end}}{{end}}
+                </label>
+                <label>
+                    Peer ASN *
+                    <input type="number" name="bgpPeerAsn" value="{{if .Peer.PeerASN}}{{.Peer.PeerASN}}{{else}}64512{{end}}" {{if .ValidationErrors.HasField "bgpPeerAsn"}}aria-invalid="true"{{end}}>
+                    {{range .ValidationErrors}}{{if eq .Field "bgpPeerAsn"}}<small class="field-error">{{.Message}}</small>{{end}}{{end}}
+                </label>
+                <label>
+                    Peer Port *
+                    <input type="number" name="bgpPeerPort" value="179" min="179" max="179" readonly {{if .ValidationErrors.HasField "bgpPeerPort"}}aria-invalid="true"{{end}}>
+                    <small>The embedded BGP engine currently supports peer port 179.</small>
+                    {{range .ValidationErrors}}{{if eq .Field "bgpPeerPort"}}<small class="field-error">{{.Message}}</small>{{end}}{{end}}
+                </label>
+            </div>
+
+            <div style="margin-top: 1rem;">
+                <label>Received Prefix Filters</label>
+                <small>Controls which prefixes received from this peer are accepted. Leave empty to accept everything.</small>
+                <div id="bgp-route-filters-list">
+                    {{range $i, $filter := .Peer.RouteFilters}}
+                    <div class="route-filter-row" style="display:flex; gap:0.5rem; margin-bottom:0.5rem;">
+                        <input type="text" name="filterPrefix[]" value="{{$filter.Prefix}}" placeholder="Prefix (e.g. 10.1.0.0/16)" style="flex:1">
+                        <select name="filterMatcher[]" style="width:auto">
+                            <option value="exact" {{if eq $filter.Matcher "exact"}}selected{{end}}>Exact</option>
+                            <option value="orlonger" {{if eq $filter.Matcher "orlonger"}}selected{{end}}>Or Longer</option>
+                        </select>
+                        <select name="filterAction[]" style="width:auto">
+                            <option value="accept" {{if eq $filter.Action "accept"}}selected{{end}}>Accept</option>
+                            <option value="reject" {{if eq $filter.Action "reject"}}selected{{end}}>Reject</option>
+                        </select>
+                        <button type="button" class="btn btn-outline-danger" style="width:auto" onclick="this.closest('.route-filter-row').remove()">X</button>
+                    </div>
+                    {{end}}
+                </div>
+                <button type="button" class="btn btn-outline secondary" style="width:auto; margin-top:0.5rem;" onclick="addRouteFilterRow()">+ Add Filter</button>
+            </div>
+
+            <div style="margin-top: 1rem;">
+                <label>Advertised Prefix Filters</label>
+                <small>Controls which locally known prefixes are advertised to this peer. Leave empty to advertise everything.</small>
+                <div id="bgp-export-filters-list">
+                    {{range $i, $filter := .Peer.ExportFilters}}
+                    <div class="route-filter-row" style="display:flex; gap:0.5rem; margin-bottom:0.5rem;">
+                        <input type="text" name="exportFilterPrefix[]" value="{{$filter.Prefix}}" placeholder="Prefix (e.g. 10.1.0.0/16)" style="flex:1">
+                        <select name="exportFilterMatcher[]" style="width:auto">
+                            <option value="exact" {{if eq $filter.Matcher "exact"}}selected{{end}}>Exact</option>
+                            <option value="orlonger" {{if eq $filter.Matcher "orlonger"}}selected{{end}}>Or Longer</option>
+                        </select>
+                        <select name="exportFilterAction[]" style="width:auto">
+                            <option value="accept" {{if eq $filter.Action "accept"}}selected{{end}}>Accept</option>
+                            <option value="reject" {{if eq $filter.Action "reject"}}selected{{end}}>Reject</option>
+                        </select>
+                        <button type="button" class="btn btn-outline-danger" style="width:auto" onclick="this.closest('.route-filter-row').remove()">X</button>
+                    </div>
+                    {{end}}
+                </div>
+                <button type="button" class="btn btn-outline secondary" style="width:auto; margin-top:0.5rem;" onclick="addRouteFilterRow('bgp-export-filters-list', 'exportFilter')">+ Add Filter</button>
+            </div>
+
+            <fieldset>
+                <label>
+                    <input type="checkbox" name="enabled" {{if or .Defaults .Peer.Enabled}}checked{{end}}>
+                    Enabled
+                </label>
+            </fieldset>
+
+            <footer>
+                <button type="button" class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+                <button type="submit" class="btn btn-primary">{{if .IsNew}}Create Peer{{else}}Save Changes{{end}}</button>
+            </footer>
+        </form>
+    </article>
+</dialog>
+{{end}}
+
 {{define "bgp-stats"}}
 <div id="bgp-stats">
     <div class="header-row">
         <h2>BGP Statistics</h2>
     </div>
+
+    {{template "bgp-custom-peers" .CustomPeers}}
 
     {{if not .Running}}
     <article class="toast toast-error">
@@ -745,7 +900,7 @@ var templates = template.Must(template.New("").Funcs(template.FuncMap{
             </span>
         </header>
 
-        <p><small>Updates Received: {{.UpdatesReceived}} &middot; Prefixes Received: {{len .Routes}}</small></p>
+        <p><small>Updates Received: {{.UpdatesReceived}} &middot; Prefixes Received: {{len .Routes}} &middot; Prefixes Advertised: {{len .AdvertisedRoutes}}</small></p>
 
         {{if .Routes}}
         <details>
@@ -777,6 +932,37 @@ var templates = template.Must(template.New("").Funcs(template.FuncMap{
             </table>
             {{if gt (len .Routes) 10}}
             <button class="btn btn-outline secondary" onclick="showAllRoutes(this)">Show All {{len .Routes}} Routes</button>
+            {{end}}
+        </details>
+        {{end}}
+
+        {{if .AdvertisedRoutes}}
+        <details>
+            <summary><strong><small>Advertised routes ({{len .AdvertisedRoutes}})</small></strong></summary>
+            <table role="grid">
+                <thead>
+                    <tr>
+                        <th scope="col">Prefix</th>
+                        <th scope="col">Next Hop</th>
+                        <th scope="col">Local Pref</th>
+                        <th scope="col">AS Path</th>
+                        <th scope="col">Status</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {{range $i, $route := .AdvertisedRoutes}}
+                    <tr class="{{if gt $i 9}}hidden-route{{end}}">
+                        <td><code>{{$route.Prefix}}</code></td>
+                        <td><code>{{$route.NextHop}}</code></td>
+                        <td>{{$route.LocalPref}}</td>
+                        <td>{{if $route.ASPath}}{{$route.ASPath}}{{else}}Local{{end}}</td>
+                        <td><span class="badge badge-ok">{{$route.Status}}</span></td>
+                    </tr>
+                    {{end}}
+                </tbody>
+            </table>
+            {{if gt (len .AdvertisedRoutes) 10}}
+            <button class="btn btn-outline secondary" onclick="showAllRoutes(this)">Show All {{len .AdvertisedRoutes}} Routes</button>
             {{end}}
         </details>
         {{end}}

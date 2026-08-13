@@ -77,11 +77,12 @@ func GetBGPStats() *models.BGPStats {
 			len(pm.AddressFamilies), totalRoutesReceived, totalRoutesSent, pm.Since)
 
 		peerStat := models.BGPPeerStats{
-			IP:              pm.IP.String(),
-			ASN:             pm.ASN,
-			State:           stateStr,
-			UpdatesReceived: pm.UpdatesReceived,
-			Routes:          make([]models.BGPRoute, 0),
+			IP:               pm.IP.String(),
+			ASN:              pm.ASN,
+			State:            stateStr,
+			UpdatesReceived:  pm.UpdatesReceived,
+			Routes:           make([]models.BGPRoute, 0),
+			AdvertisedRoutes: make([]models.BGPRoute, 0),
 		}
 
 		if !pm.Since.IsZero() && pm.State == 6 {
@@ -130,6 +131,30 @@ func GetBGPStats() *models.BGPStats {
 							LocalPref: p.BGPPath.BGPPathA.LocalPref,
 							ASPath:    p.BGPPath.ASPath.String(),
 							Status:    status,
+						})
+					}
+				}
+			}
+
+			// AFI 1/2 (IPv4/IPv6), SAFI 1 (Unicast) — the AdjRIBOut only holds
+			// prefixes that already passed the peer's export filter chain, so
+			// everything dumped here is, by definition, advertised.
+			for _, af := range []struct {
+				afi  uint16
+				safi uint8
+			}{{packet.AFIIPv4, packet.SAFIUnicast}, {packet.AFIIPv6, packet.SAFIUnicast}} {
+				ribOut := active.server.GetRIBOut(defVRF, pm.IP, af.afi, af.safi)
+				if ribOut == nil {
+					continue
+				}
+				for _, r := range ribOut.Dump() {
+					for _, p := range r.Paths() {
+						peerStat.AdvertisedRoutes = append(peerStat.AdvertisedRoutes, models.BGPRoute{
+							Prefix:    r.Prefix().String(),
+							NextHop:   p.NextHop().String(),
+							LocalPref: p.BGPPath.BGPPathA.LocalPref,
+							ASPath:    p.BGPPath.ASPath.String(),
+							Status:    "Advertised",
 						})
 					}
 				}

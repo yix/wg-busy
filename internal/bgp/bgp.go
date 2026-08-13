@@ -110,71 +110,95 @@ func desiredPeers(cfg *models.AppConfig, defVRF *vrf.VRF, routerID uint32) (map[
 		if !p.Enabled || !p.BGPEnabled {
 			continue
 		}
-
-		bPeerIP, err := bnet.IPFromString(p.BGPPeerIP)
+		bPeerIP, peerCfg, err := buildPeerConfig(cfg, defVRF, routerID, p.Name, p.BGPConnect, p.BGPPeerIP, p.BGPPeerPort, p.BGPPeerASN, p.BGPRouteFilters, p.BGPExportFilters)
 		if err != nil {
-			return nil, fmt.Errorf("peer %q has invalid BGP peer IP %q: %w", p.Name, p.BGPPeerIP, err)
-		}
-		if p.BGPPeerPort != 179 {
-			return nil, fmt.Errorf("peer %q uses unsupported BGP peer port %d; only 179 is supported", p.Name, p.BGPPeerPort)
+			return nil, err
 		}
 		if _, exists := desired[bPeerIP]; exists {
 			return nil, fmt.Errorf("multiple enabled BGP peers use address %s", bPeerIP.String())
 		}
-
-		peerCfg := server.PeerConfig{
-			AdminEnabled:               true,
-			AuthenticationKey:          "",            // TODO: add support for preshared keys
-			Passive:                    !p.BGPConnect, // by default wg-busy only responds; peers must initiate
-			TTL:                        255,           // eBGP multihop over WireGuard tunnel
-			ReconnectInterval:          15 * time.Second,
-			KeepAlive:                  30 * time.Second,
-			HoldTime:                   90 * time.Second,
-			PeerAddress:                &bPeerIP,
-			LocalAS:                    cfg.Server.BGPASN,
-			PeerAS:                     p.BGPPeerASN,
-			RouterID:                   routerID,
-			VRF:                        defVRF,
-			AdvertiseIPv4MultiProtocol: true, // Required to negotiate IPv4 AFI over IPv6 sessions
-		}
-
-		if cfg.Server.BGPListenAddress != "" {
-			if lA, err := bnet.IPFromString(cfg.Server.BGPListenAddress); err == nil {
-				peerCfg.LocalAddress = &lA
-			} else {
-				log.Printf("[BGP WARN] Invalid BGP listen address %q: %v", cfg.Server.BGPListenAddress, err)
-			}
-		}
-		if peerCfg.LocalAddress == nil {
-			// bio-rd panics if LocalAddress is nil. Default to generic unspec IPv6 which covers all interfaces.
-			unspec, _ := bnet.IPFromString("::")
-			peerCfg.LocalAddress = &unspec
-		}
-		// bio-rd canonicalizes these pointers inside AddPeer and later compares
-		// LocalAddress by pointer identity. Canonicalize the desired config too so
-		// an unrelated save does not look like a peer-address change.
-		peerCfg.LocalAddress = peerCfg.LocalAddress.Dedup()
-		peerCfg.PeerAddress = peerCfg.PeerAddress.Dedup()
-
-		importFilter := buildFilterChain(p.BGPRouteFilters)
-		exportFilter := filter.NewAcceptAllFilterChain()
-
-		afi := &server.AddressFamilyConfig{
-			ImportFilterChain: importFilter,
-			ExportFilterChain: exportFilter,
-		}
-
-		// Always enable both IPv4 and IPv6 unicast so peers can
-		// advertise routes of either family over a single session.
-		peerCfg.IPv4 = afi
-		peerCfg.IPv6 = afi
-
-		log.Printf("[BGP] Desired peer: name=%q ip=%s localAS=%d peerAS=%d filters=%d",
-			p.Name, bPeerIP.String(), cfg.Server.BGPASN, p.BGPPeerASN, len(p.BGPRouteFilters))
-
 		desired[bPeerIP] = peerCfg
 	}
+
+	for _, p := range cfg.BGPPeers {
+		if !p.Enabled {
+			continue
+		}
+		bPeerIP, peerCfg, err := buildPeerConfig(cfg, defVRF, routerID, p.Name, p.Connect, p.PeerIP, p.PeerPort, p.PeerASN, p.RouteFilters, p.ExportFilters)
+		if err != nil {
+			return nil, err
+		}
+		if _, exists := desired[bPeerIP]; exists {
+			return nil, fmt.Errorf("multiple enabled BGP peers use address %s", bPeerIP.String())
+		}
+		desired[bPeerIP] = peerCfg
+	}
+
 	return desired, nil
+}
+
+// buildPeerConfig builds a bio-rd peer config for a single BGP session, shared
+// by WireGuard-attached peers and standalone custom peers.
+func buildPeerConfig(cfg *models.AppConfig, defVRF *vrf.VRF, routerID uint32, name string, connect bool, peerIP string, peerPort uint16, peerASN uint32, routeFilters, exportFilters []models.RouteFilter) (bnet.IP, server.PeerConfig, error) {
+	bPeerIP, err := bnet.IPFromString(peerIP)
+	if err != nil {
+		return bnet.IP{}, server.PeerConfig{}, fmt.Errorf("peer %q has invalid BGP peer IP %q: %w", name, peerIP, err)
+	}
+	if peerPort != 179 {
+		return bnet.IP{}, server.PeerConfig{}, fmt.Errorf("peer %q uses unsupported BGP peer port %d; only 179 is supported", name, peerPort)
+	}
+
+	peerCfg := server.PeerConfig{
+		AdminEnabled:               true,
+		AuthenticationKey:          "",       // TODO: add support for preshared keys
+		Passive:                    !connect, // by default wg-busy only responds; peers must initiate
+		TTL:                        255,      // eBGP multihop over WireGuard tunnel
+		ReconnectInterval:          15 * time.Second,
+		KeepAlive:                  30 * time.Second,
+		HoldTime:                   90 * time.Second,
+		PeerAddress:                &bPeerIP,
+		LocalAS:                    cfg.Server.BGPASN,
+		PeerAS:                     peerASN,
+		RouterID:                   routerID,
+		VRF:                        defVRF,
+		AdvertiseIPv4MultiProtocol: true, // Required to negotiate IPv4 AFI over IPv6 sessions
+	}
+
+	if cfg.Server.BGPListenAddress != "" {
+		if lA, err := bnet.IPFromString(cfg.Server.BGPListenAddress); err == nil {
+			peerCfg.LocalAddress = &lA
+		} else {
+			log.Printf("[BGP WARN] Invalid BGP listen address %q: %v", cfg.Server.BGPListenAddress, err)
+		}
+	}
+	if peerCfg.LocalAddress == nil {
+		// bio-rd panics if LocalAddress is nil. Default to generic unspec IPv6 which covers all interfaces.
+		unspec, _ := bnet.IPFromString("::")
+		peerCfg.LocalAddress = &unspec
+	}
+	// bio-rd canonicalizes these pointers inside AddPeer and later compares
+	// LocalAddress by pointer identity. Canonicalize the desired config too so
+	// an unrelated save does not look like a peer-address change.
+	peerCfg.LocalAddress = peerCfg.LocalAddress.Dedup()
+	peerCfg.PeerAddress = peerCfg.PeerAddress.Dedup()
+
+	importFilter := buildFilterChain("import", routeFilters)
+	exportFilter := buildFilterChain("export", exportFilters)
+
+	afi := &server.AddressFamilyConfig{
+		ImportFilterChain: importFilter,
+		ExportFilterChain: exportFilter,
+	}
+
+	// Always enable both IPv4 and IPv6 unicast so peers can
+	// advertise routes of either family over a single session.
+	peerCfg.IPv4 = afi
+	peerCfg.IPv6 = afi
+
+	log.Printf("[BGP] Desired peer: name=%q ip=%s localAS=%d peerAS=%d filters=%d",
+		name, bPeerIP.String(), cfg.Server.BGPASN, peerASN, len(routeFilters))
+
+	return bPeerIP, peerCfg, nil
 }
 
 func reconcilePeers(runtime *bgpRuntime, cfg *models.AppConfig) error {
@@ -287,13 +311,16 @@ func (runtime *bgpRuntime) shutdown() error {
 	return listenerErr
 }
 
-func buildFilterChain(filters []models.RouteFilter) filter.Chain {
+// buildFilterChain builds a filter chain for either direction of a BGP
+// session. kind is "import" (received prefixes) or "export" (advertised
+// prefixes) and is only used to label log output.
+func buildFilterChain(kind string, filters []models.RouteFilter) filter.Chain {
 	if len(filters) == 0 {
-		log.Println("[BGP] No route filters configured — accepting all prefixes (accept-all policy)")
+		log.Printf("[BGP] No %s filters configured — accepting all prefixes (accept-all policy)", kind)
 		return filter.NewAcceptAllFilterChain()
 	}
 
-	log.Printf("[BGP] Building filter chain with %d term(s)", len(filters))
+	log.Printf("[BGP] Building %s filter chain with %d term(s)", kind, len(filters))
 	var terms []*filter.Term
 	for i, f := range filters {
 		pfx, err := bnet.PrefixFromString(f.Prefix)
@@ -320,13 +347,13 @@ func buildFilterChain(filters []models.RouteFilter) filter.Chain {
 		}
 
 		termName := fmt.Sprintf("term-%d", i)
-		log.Printf("[BGP] Filter term %q: prefix=%s matcher=%s action=%s", termName, f.Prefix, f.Matcher, f.Action)
+		log.Printf("[BGP] %s filter term %q: prefix=%s matcher=%s action=%s", kind, termName, f.Prefix, f.Matcher, f.Action)
 		terms = append(terms, filter.NewTerm(termName, []*filter.TermCondition{termCond}, []actions.Action{action}))
 	}
 
 	// Implicit reject at the end — anything not matched above is denied.
-	log.Println("[BGP] Filter chain: implicit default-reject at end of chain")
+	log.Printf("[BGP] %s filter chain: implicit default-reject at end of chain", kind)
 	terms = append(terms, filter.NewTerm("default-reject", []*filter.TermCondition{}, []actions.Action{&actions.RejectAction{}}))
 
-	return filter.Chain{filter.NewFilter("dynamic-filter", terms)}
+	return filter.Chain{filter.NewFilter(kind+"-filter", terms)}
 }

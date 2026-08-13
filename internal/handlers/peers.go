@@ -171,7 +171,7 @@ func (h *handler) CreatePeer(w http.ResponseWriter, r *http.Request) {
 	advertisedRoutes := parseRouteList(r.FormValue("advertisedRoutes"))
 	policyRoutes := parseRouteList(r.FormValue("policyRoutes"))
 
-	bgpEnabled, bgpConnect, bgpPeerIP, bgpPeerPort, bgpPeerASN, bgpRouteFilters := parsePeerBGPForm(r)
+	bgpEnabled, bgpConnect, bgpPeerIP, bgpPeerPort, bgpPeerASN, bgpRouteFilters, bgpExportFilters := parsePeerBGPForm(r)
 
 	id, err := newPeerID()
 	if err != nil {
@@ -204,6 +204,7 @@ func (h *handler) CreatePeer(w http.ResponseWriter, r *http.Request) {
 		BGPPeerPort:         bgpPeerPort,
 		BGPPeerASN:          bgpPeerASN,
 		BGPRouteFilters:     bgpRouteFilters,
+		BGPExportFilters:    bgpExportFilters,
 		Enabled:             r.FormValue("enabled") == "on",
 		CreatedAt:           now,
 		UpdatedAt:           now,
@@ -280,7 +281,7 @@ func (h *handler) UpdatePeer(w http.ResponseWriter, r *http.Request) {
 	advertisedRoutes := parseRouteList(r.FormValue("advertisedRoutes"))
 	policyRoutes := parseRouteList(r.FormValue("policyRoutes"))
 
-	bgpEnabled, bgpConnect, bgpPeerIP, bgpPeerPort, bgpPeerASN, bgpRouteFilters := parsePeerBGPForm(r)
+	bgpEnabled, bgpConnect, bgpPeerIP, bgpPeerPort, bgpPeerASN, bgpRouteFilters, bgpExportFilters := parsePeerBGPForm(r)
 
 	// Holds what the user submitted, so a rejected edit can be shown back to them
 	// (the store rolls its own copy back on error).
@@ -313,6 +314,7 @@ func (h *handler) UpdatePeer(w http.ResponseWriter, r *http.Request) {
 		p.BGPPeerPort = bgpPeerPort
 		p.BGPPeerASN = bgpPeerASN
 		p.BGPRouteFilters = bgpRouteFilters
+		p.BGPExportFilters = bgpExportFilters
 		p.Enabled = r.FormValue("enabled") == "on"
 		p.UpdatedAt = time.Now().UTC()
 
@@ -539,25 +541,37 @@ func (h *handler) listPeersOOB(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func parsePeerBGPForm(r *http.Request) (bool, bool, string, uint16, uint32, []models.RouteFilter) {
-	bgpEnabled := r.FormValue("bgpEnabled") == "on"
-	bgpConnect := r.FormValue("bgpConnect") == "on"
-	bgpPeerIP := strings.TrimSpace(r.FormValue("bgpPeerIP"))
+func parsePeerBGPForm(r *http.Request) (bgpEnabled, bgpConnect bool, bgpPeerIP string, bgpPeerPort uint16, bgpPeerASN uint32, bgpRouteFilters, bgpExportFilters []models.RouteFilter) {
+	bgpEnabled = r.FormValue("bgpEnabled") == "on"
+	bgpConnect = r.FormValue("bgpConnect") == "on"
+	bgpPeerIP = strings.TrimSpace(r.FormValue("bgpPeerIP"))
 
-	bgpPeerPort, _ := strconv.ParseUint(r.FormValue("bgpPeerPort"), 10, 16)
-	if bgpEnabled && bgpPeerPort == 0 {
-		bgpPeerPort = 179
+	port, _ := strconv.ParseUint(r.FormValue("bgpPeerPort"), 10, 16)
+	if bgpEnabled && port == 0 {
+		port = 179
 	}
+	bgpPeerPort = uint16(port)
 
-	bgpPeerASN, _ := strconv.ParseUint(r.FormValue("bgpPeerAsn"), 10, 32)
-	if bgpEnabled && bgpPeerASN == 0 {
-		bgpPeerASN = 64512
+	asn, _ := strconv.ParseUint(r.FormValue("bgpPeerAsn"), 10, 32)
+	if bgpEnabled && asn == 0 {
+		asn = 64512
 	}
+	bgpPeerASN = uint32(asn)
 
-	var bgpRouteFilters []models.RouteFilter
-	prefixes := r.Form["filterPrefix[]"]
-	matchers := r.Form["filterMatcher[]"]
-	actions := r.Form["filterAction[]"]
+	bgpRouteFilters = parseRouteFilterForm(r, "filterPrefix[]", "filterMatcher[]", "filterAction[]")
+	bgpExportFilters = parseRouteFilterForm(r, "exportFilterPrefix[]", "exportFilterMatcher[]", "exportFilterAction[]")
+
+	return
+}
+
+// parseRouteFilterForm reads a route-filter row list from a submitted form,
+// shared by the import (received) and export (advertised) filter sections on
+// both the WireGuard peer form and the custom BGP peer form.
+func parseRouteFilterForm(r *http.Request, prefixField, matcherField, actionField string) []models.RouteFilter {
+	var filters []models.RouteFilter
+	prefixes := r.Form[prefixField]
+	matchers := r.Form[matcherField]
+	actions := r.Form[actionField]
 
 	for i := 0; i < len(prefixes); i++ {
 		pfx := strings.TrimSpace(prefixes[i])
@@ -573,12 +587,12 @@ func parsePeerBGPForm(r *http.Request) (bool, bool, string, uint16, uint32, []mo
 			action = strings.TrimSpace(actions[i])
 		}
 
-		bgpRouteFilters = append(bgpRouteFilters, models.RouteFilter{
+		filters = append(filters, models.RouteFilter{
 			Prefix:  pfx,
 			Matcher: matcher,
 			Action:  action,
 		})
 	}
 
-	return bgpEnabled, bgpConnect, bgpPeerIP, uint16(bgpPeerPort), uint32(bgpPeerASN), bgpRouteFilters
+	return filters
 }

@@ -179,20 +179,24 @@
             });
         }
 
-        function addRouteFilterRow() {
-            var list = document.getElementById('bgp-route-filters-list');
+        // containerId/namePrefix let the same form host two independent filter
+        // lists (received vs. advertised prefixes) without their rows colliding.
+        function addRouteFilterRow(containerId, namePrefix) {
+            containerId = containerId || 'bgp-route-filters-list';
+            namePrefix = namePrefix || 'filter';
+            var list = document.getElementById(containerId);
             if (!list) return;
 
             var div = document.createElement('div');
             div.className = 'route-filter-row';
             div.style.cssText = 'display:flex; gap:0.5rem; margin-bottom:0.5rem;';
             div.innerHTML = `
-                <input type="text" name="filterPrefix[]" value="" placeholder="Prefix (e.g. 10.1.0.0/16)" style="flex:1">
-                <select name="filterMatcher[]" style="width:auto">
+                <input type="text" name="${namePrefix}Prefix[]" value="" placeholder="Prefix (e.g. 10.1.0.0/16)" style="flex:1">
+                <select name="${namePrefix}Matcher[]" style="width:auto">
                     <option value="exact">Exact</option>
                     <option value="orlonger">Or Longer</option>
                 </select>
-                <select name="filterAction[]" style="width:auto">
+                <select name="${namePrefix}Action[]" style="width:auto">
                     <option value="accept">Accept</option>
                     <option value="reject">Reject</option>
                 </select>

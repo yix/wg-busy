@@ -14,6 +14,7 @@ import (
 type AppConfig struct {
 	Server   ServerConfig   `yaml:"server"`
 	Peers    []Peer         `yaml:"peers"`
+	BGPPeers []BGPPeer      `yaml:"bgpPeers,omitempty"`
 	ZeroTier ZeroTierConfig `yaml:"zerotier,omitempty"`
 }
 
@@ -26,6 +27,12 @@ func (c AppConfig) Clone() AppConfig {
 		clone.Peers[i].AdvertisedRoutes = append([]string(nil), c.Peers[i].AdvertisedRoutes...)
 		clone.Peers[i].PolicyRoutes = append([]string(nil), c.Peers[i].PolicyRoutes...)
 		clone.Peers[i].BGPRouteFilters = append([]RouteFilter(nil), c.Peers[i].BGPRouteFilters...)
+		clone.Peers[i].BGPExportFilters = append([]RouteFilter(nil), c.Peers[i].BGPExportFilters...)
+	}
+	clone.BGPPeers = append([]BGPPeer(nil), c.BGPPeers...)
+	for i := range clone.BGPPeers {
+		clone.BGPPeers[i].RouteFilters = append([]RouteFilter(nil), c.BGPPeers[i].RouteFilters...)
+		clone.BGPPeers[i].ExportFilters = append([]RouteFilter(nil), c.BGPPeers[i].ExportFilters...)
 	}
 	clone.ZeroTier.Networks = append([]ZeroTierNetwork(nil), c.ZeroTier.Networks...)
 	return clone
@@ -96,6 +103,81 @@ type RouteFilter struct {
 	Action  string `yaml:"action"`  // accept, reject
 }
 
+// BGPPeer is a standalone BGP session that is not tied to a WireGuard peer —
+// e.g. a route reflector or router reachable directly (not over a tunnel).
+type BGPPeer struct {
+	ID       string `yaml:"id"`
+	Name     string `yaml:"name"`
+	Enabled  bool   `yaml:"enabled"`
+	Connect  bool   `yaml:"connect,omitempty"`
+	PeerIP   string `yaml:"peerIP"`
+	PeerPort uint16 `yaml:"peerPort,omitempty"`
+	PeerASN  uint32 `yaml:"peerAsn"`
+	// RouteFilters governs which prefixes received from this peer are accepted.
+	RouteFilters []RouteFilter `yaml:"routeFilters,omitempty"`
+	// ExportFilters governs which locally known prefixes are advertised to this peer.
+	ExportFilters []RouteFilter `yaml:"exportFilters,omitempty"`
+	CreatedAt     time.Time     `yaml:"createdAt"`
+	UpdatedAt     time.Time     `yaml:"updatedAt"`
+}
+
+// Validate checks all fields on BGPPeer and returns all errors found.
+func (p *BGPPeer) Validate() ValidationErrors {
+	var errs ValidationErrors
+
+	if strings.TrimSpace(p.Name) == "" {
+		errs = append(errs, ValidationError{Field: "name", Message: "required"})
+	} else if len(p.Name) > 64 {
+		errs = append(errs, ValidationError{Field: "name", Message: "maximum 64 characters"})
+	} else if !nameRegexp.MatchString(p.Name) {
+		errs = append(errs, ValidationError{Field: "name", Message: "only letters, numbers, spaces, dashes, dots, underscores"})
+	}
+
+	if p.PeerIP == "" {
+		errs = append(errs, ValidationError{Field: "bgpPeerIP", Message: "required"})
+	} else if net.ParseIP(p.PeerIP) == nil {
+		errs = append(errs, ValidationError{Field: "bgpPeerIP", Message: "must be a valid IP address"})
+	}
+
+	if p.PeerPort == 0 {
+		errs = append(errs, ValidationError{Field: "bgpPeerPort", Message: "must be > 0"})
+	} else if p.PeerPort != 179 {
+		errs = append(errs, ValidationError{Field: "bgpPeerPort", Message: "the embedded BGP engine currently supports peer port 179 only"})
+	}
+
+	if p.PeerASN == 0 {
+		errs = append(errs, ValidationError{Field: "bgpPeerAsn", Message: "required"})
+	}
+
+	errs = append(errs, validateRouteFilters(p.RouteFilters, "routeFilters")...)
+	errs = append(errs, validateRouteFilters(p.ExportFilters, "exportFilters")...)
+
+	return errs
+}
+
+// validateRouteFilters checks a list of BGP route filter terms, shared by the
+// import (received) and export (advertised) filter lists on both Peer and
+// BGPPeer. fieldPrefix names the field in validation errors, e.g. "bgpRouteFilters".
+func validateRouteFilters(filters []RouteFilter, fieldPrefix string) ValidationErrors {
+	var errs ValidationErrors
+	for i, filter := range filters {
+		if filter.Prefix == "" {
+			errs = append(errs, ValidationError{Field: fmt.Sprintf("%s[%d].prefix", fieldPrefix, i), Message: "required"})
+		} else if _, _, err := net.ParseCIDR(filter.Prefix); err != nil {
+			errs = append(errs, ValidationError{Field: fmt.Sprintf("%s[%d].prefix", fieldPrefix, i), Message: "invalid CIDR"})
+		}
+
+		if filter.Matcher != "exact" && filter.Matcher != "orlonger" {
+			errs = append(errs, ValidationError{Field: fmt.Sprintf("%s[%d].matcher", fieldPrefix, i), Message: "must be 'exact' or 'orlonger'"})
+		}
+
+		if filter.Action != "accept" && filter.Action != "reject" {
+			errs = append(errs, ValidationError{Field: fmt.Sprintf("%s[%d].action", fieldPrefix, i), Message: "must be 'accept' or 'reject'"})
+		}
+	}
+	return errs
+}
+
 // Peer represents a WireGuard peer (client).
 type Peer struct {
 	ID                   string   `yaml:"id"`
@@ -120,34 +202,38 @@ type Peer struct {
 	Enabled              bool     `yaml:"enabled"`
 
 	// BGP
-	BGPEnabled      bool          `yaml:"bgpEnabled,omitempty"`
-	BGPConnect      bool          `yaml:"bgpConnect,omitempty"`
-	BGPPeerIP       string        `yaml:"bgpPeerIP,omitempty"`
-	BGPPeerPort     uint16        `yaml:"bgpPeerPort,omitempty"`
-	BGPPeerASN      uint32        `yaml:"bgpPeerAsn,omitempty"`
+	BGPEnabled  bool   `yaml:"bgpEnabled,omitempty"`
+	BGPConnect  bool   `yaml:"bgpConnect,omitempty"`
+	BGPPeerIP   string `yaml:"bgpPeerIP,omitempty"`
+	BGPPeerPort uint16 `yaml:"bgpPeerPort,omitempty"`
+	BGPPeerASN  uint32 `yaml:"bgpPeerAsn,omitempty"`
+	// BGPRouteFilters governs which prefixes received from this peer are accepted.
 	BGPRouteFilters []RouteFilter `yaml:"bgpRouteFilters,omitempty"`
+	// BGPExportFilters governs which locally known prefixes are advertised to this peer.
+	BGPExportFilters []RouteFilter `yaml:"bgpExportFilters,omitempty"`
 
 	CreatedAt time.Time `yaml:"createdAt"`
 	UpdatedAt time.Time `yaml:"updatedAt"`
 }
 
-// BGPRoute represents a single received component in the BGP AdjRIBIn.
+// BGPRoute represents a single prefix in the BGP AdjRIBIn or AdjRIBOut.
 type BGPRoute struct {
 	Prefix    string `json:"prefix"`
 	NextHop   string `json:"nextHop"`
 	LocalPref uint32 `json:"localPref"`
 	ASPath    string `json:"asPath"`
-	Status    string `json:"status"` // "Accepted" or "Filtered"
+	Status    string `json:"status"` // "Accepted", "Filtered", or "Advertised"
 }
 
-// BGPPeerStats holds statistics and received prefixes for a single BGP peer.
+// BGPPeerStats holds statistics, received and advertised prefixes for a single BGP peer.
 type BGPPeerStats struct {
-	IP              string     `json:"ip"`
-	ASN             uint32     `json:"asn"`
-	State           string     `json:"state"`
-	Uptime          string     `json:"uptime"`
-	UpdatesReceived uint64     `json:"updatesReceived"`
-	Routes          []BGPRoute `json:"routes"`
+	IP               string     `json:"ip"`
+	ASN              uint32     `json:"asn"`
+	State            string     `json:"state"`
+	Uptime           string     `json:"uptime"`
+	UpdatesReceived  uint64     `json:"updatesReceived"`
+	Routes           []BGPRoute `json:"routes"`
+	AdvertisedRoutes []BGPRoute `json:"advertisedRoutes"`
 }
 
 // BGPStats aggregates all BGP statistics for the daemon.
@@ -452,21 +538,8 @@ func (p *Peer) Validate(gateways []GatewayNet) ValidationErrors {
 			errs = append(errs, ValidationError{Field: "bgpPeerAsn", Message: "required when BGP is enabled"})
 		}
 
-		for i, filter := range p.BGPRouteFilters {
-			if filter.Prefix == "" {
-				errs = append(errs, ValidationError{Field: fmt.Sprintf("bgpRouteFilters[%d].prefix", i), Message: "required"})
-			} else if _, _, err := net.ParseCIDR(filter.Prefix); err != nil {
-				errs = append(errs, ValidationError{Field: fmt.Sprintf("bgpRouteFilters[%d].prefix", i), Message: "invalid CIDR"})
-			}
-
-			if filter.Matcher != "exact" && filter.Matcher != "orlonger" {
-				errs = append(errs, ValidationError{Field: fmt.Sprintf("bgpRouteFilters[%d].matcher", i), Message: "must be 'exact' or 'orlonger'"})
-			}
-
-			if filter.Action != "accept" && filter.Action != "reject" {
-				errs = append(errs, ValidationError{Field: fmt.Sprintf("bgpRouteFilters[%d].action", i), Message: "must be 'accept' or 'reject'"})
-			}
-		}
+		errs = append(errs, validateRouteFilters(p.BGPRouteFilters, "bgpRouteFilters")...)
+		errs = append(errs, validateRouteFilters(p.BGPExportFilters, "bgpExportFilters")...)
 	}
 
 	return errs
@@ -506,6 +579,9 @@ func ValidateConfig(cfg AppConfig) ValidationErrors {
 		errs = append(errs, cfg.Peers[i].Validate(nil)...)
 	}
 	errs = append(errs, ValidateExitNodeRefs(cfg.Peers)...)
+	for i := range cfg.BGPPeers {
+		errs = append(errs, cfg.BGPPeers[i].Validate()...)
+	}
 
 	peerIDs := make(map[string]string, len(cfg.Peers))
 	publicKeys := make(map[string]string, len(cfg.Peers))
@@ -576,6 +652,27 @@ func ValidateConfig(cfg AppConfig) ValidationErrors {
 			}
 		}
 	}
+
+	bgpPeerIDs := make(map[string]string, len(cfg.BGPPeers))
+	for _, p := range cfg.BGPPeers {
+		if previous, ok := bgpPeerIDs[p.ID]; ok {
+			errs = append(errs, ValidationError{Field: "id", Message: fmt.Sprintf("BGP peer %q duplicates ID used by %q", p.Name, previous)})
+		} else {
+			bgpPeerIDs[p.ID] = p.Name
+		}
+		if !p.Enabled {
+			continue
+		}
+		if ip := net.ParseIP(strings.TrimSpace(p.PeerIP)); ip != nil {
+			key := ip.String()
+			if previous, ok := bgpPeers[key]; ok {
+				errs = append(errs, ValidationError{Field: "bgpPeerIP", Message: fmt.Sprintf("BGP peer %q duplicates address used by %q", p.Name, previous)})
+			} else {
+				bgpPeers[key] = p.Name
+			}
+		}
+	}
+
 	return errs
 }
 
@@ -611,6 +708,16 @@ func CascadeClearExitNode(peers []Peer, exitNodeID string) {
 
 // FindPeerByID returns a pointer to the peer with the given ID, or nil.
 func FindPeerByID(peers []Peer, id string) *Peer {
+	for i := range peers {
+		if peers[i].ID == id {
+			return &peers[i]
+		}
+	}
+	return nil
+}
+
+// FindBGPPeerByID returns a pointer to the custom BGP peer with the given ID, or nil.
+func FindBGPPeerByID(peers []BGPPeer, id string) *BGPPeer {
 	for i := range peers {
 		if peers[i].ID == id {
 			return &peers[i]
