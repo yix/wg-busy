@@ -2,9 +2,13 @@ package bgp
 
 import (
 	"errors"
+	"net"
+	"slices"
 	"testing"
 
+	bnet "github.com/bio-routing/bio-rd/net"
 	"github.com/bio-routing/bio-rd/protocols/kernel"
+	"github.com/bio-routing/bio-rd/route"
 	"github.com/bio-routing/bio-rd/routingtable/vrf"
 
 	"github.com/yix/wg-busy/internal/models"
@@ -86,7 +90,7 @@ func TestDesiredPeersRejectsUnsupportedRuntimeIdentity(t *testing.T) {
 		BGPPeerIP: "10.0.0.2", BGPPeerPort: 180, BGPPeerASN: 64513,
 	}
 	cfg := &models.AppConfig{Server: models.ServerConfig{BGPASN: 64512}, Peers: []models.Peer{peer}}
-	if _, err := desiredPeers(cfg, defVRF, 1); err == nil {
+	if _, err := desiredPeers(cfg, defVRF, 1, nil); err == nil {
 		t.Fatal("unsupported BGP peer port was accepted")
 	}
 
@@ -94,7 +98,7 @@ func TestDesiredPeersRejectsUnsupportedRuntimeIdentity(t *testing.T) {
 	duplicate := peer
 	duplicate.Name = "second"
 	cfg.Peers = []models.Peer{peer, duplicate}
-	if _, err := desiredPeers(cfg, defVRF, 1); err == nil {
+	if _, err := desiredPeers(cfg, defVRF, 1, nil); err == nil {
 		t.Fatal("duplicate BGP peer IP was accepted")
 	}
 }
@@ -110,11 +114,12 @@ func TestDesiredPeersUseStableAddressIdentity(t *testing.T) {
 		}},
 	}
 
-	first, err := desiredPeers(cfg, defVRF, 1)
+	localPrefixes := []string{"10.8.0.0/24", "10.8.0.2/32"}
+	first, err := desiredPeers(cfg, defVRF, 1, localPrefixes)
 	if err != nil {
 		t.Fatal(err)
 	}
-	second, err := desiredPeers(cfg, defVRF, 1)
+	second, err := desiredPeers(cfg, defVRF, 1, localPrefixes)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -137,12 +142,12 @@ func TestRouteFilterChangeRequiresDurablePeerReplacement(t *testing.T) {
 		BGPPeerIP: "10.0.0.2", BGPPeerPort: 179, BGPPeerASN: 64513,
 	}
 	cfg := &models.AppConfig{Server: models.ServerConfig{BGPASN: 64512}, Peers: []models.Peer{peer}}
-	before, err := desiredPeers(cfg, defVRF, 1)
+	before, err := desiredPeers(cfg, defVRF, 1, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	cfg.Peers[0].BGPRouteFilters = []models.RouteFilter{{Prefix: "10.0.0.0/8", Matcher: "orlonger", Action: "accept"}}
-	after, err := desiredPeers(cfg, defVRF, 1)
+	after, err := desiredPeers(cfg, defVRF, 1, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -151,6 +156,91 @@ func TestRouteFilterChangeRequiresDurablePeerReplacement(t *testing.T) {
 		if !peerNeedsReplacement(&beforeCfg, &afterCfg) {
 			t.Fatal("route-filter change did not require durable peer replacement")
 		}
+	}
+}
+
+func TestRedistributeConnectedChangeRequiresDurablePeerReplacement(t *testing.T) {
+	registry := vrf.NewVRFRegistry()
+	defVRF := registry.CreateVRFIfNotExists(vrf.DefaultVRFName, 0)
+	cfg := &models.AppConfig{
+		Server: models.ServerConfig{BGPASN: 64512},
+		Peers: []models.Peer{{
+			Name: "peer", Enabled: true, BGPEnabled: true,
+			BGPPeerIP: "10.0.0.2", BGPPeerPort: 179, BGPPeerASN: 64513,
+		}},
+	}
+
+	localPrefixes := []string{"10.8.0.0/24", "10.8.0.2/32"}
+	before, err := desiredPeers(cfg, defVRF, 1, localPrefixes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.Peers[0].BGPRedistributeConnected = true
+	after, err := desiredPeers(cfg, defVRF, 1, localPrefixes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for ip, beforeCfg := range before {
+		afterCfg := after[ip]
+		if !peerNeedsReplacement(&beforeCfg, &afterCfg) {
+			t.Fatal("redistribute-connected change did not require durable peer replacement")
+		}
+	}
+}
+
+func TestExportFilterAllowsLocalRoutesOnlyWhenEnabled(t *testing.T) {
+	prefix, err := bnet.PrefixFromString("10.0.0.0/24")
+	if err != nil {
+		t.Fatal(err)
+	}
+	localPath := &route.Path{Type: route.StaticPathType}
+
+	localPrefixes := []string{"10.0.0.0/24"}
+	if _, rejected := buildExportFilterChain(nil, false, localPrefixes).Process(prefix, localPath); !rejected {
+		t.Fatal("local route was exported without per-peer redistribution enabled")
+	}
+	if _, rejected := buildExportFilterChain(nil, true, localPrefixes).Process(prefix, localPath); rejected {
+		t.Fatal("local route was rejected with per-peer redistribution enabled")
+	}
+}
+
+func TestLocalAndConnectedPrefixesPreserveHostAddress(t *testing.T) {
+	addresses := []net.Addr{
+		&net.IPNet{IP: net.ParseIP("10.8.0.2"), Mask: net.CIDRMask(24, 32)},
+		&net.IPNet{IP: net.ParseIP("2001:db8::2"), Mask: net.CIDRMask(64, 128)},
+		&net.IPNet{IP: net.ParseIP("127.0.0.1"), Mask: net.CIDRMask(8, 32)},
+		&net.IPNet{IP: net.ParseIP("fe80::1"), Mask: net.CIDRMask(64, 128)},
+	}
+	want := []string{"10.8.0.0/24", "10.8.0.2/32", "2001:db8::/64", "2001:db8::2/128"}
+	if got := localAndConnectedPrefixes(addresses); !slices.Equal(got, want) {
+		t.Fatalf("localAndConnectedPrefixes() = %v, want %v", got, want)
+	}
+}
+
+func TestDesiredLocalPrefixesRequiresOptInPeer(t *testing.T) {
+	original := interfaceAddresses
+	interfaceAddresses = func() ([]net.Addr, error) {
+		return []net.Addr{&net.IPNet{IP: net.ParseIP("10.8.0.2"), Mask: net.CIDRMask(24, 32)}}, nil
+	}
+	t.Cleanup(func() { interfaceAddresses = original })
+
+	cfg := &models.AppConfig{Peers: []models.Peer{{Enabled: true, BGPEnabled: true, BGPRedistributeConnected: true}}}
+	prefixes, err := desiredLocalPrefixes(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"10.8.0.0/24", "10.8.0.2/32"}
+	if !slices.Equal(prefixes, want) {
+		t.Fatalf("desiredLocalPrefixes() = %v, want %v", prefixes, want)
+	}
+
+	cfg.Peers[0].BGPRedistributeConnected = false
+	prefixes, err = desiredLocalPrefixes(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(prefixes) != 0 {
+		t.Fatalf("local prefixes discovered without an opted-in peer: %v", prefixes)
 	}
 }
 

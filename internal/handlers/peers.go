@@ -174,7 +174,7 @@ func (h *handler) CreatePeer(w http.ResponseWriter, r *http.Request) {
 	advertisedRoutes := parseRouteList(r.FormValue("advertisedRoutes"))
 	policyRoutes := parseRouteList(r.FormValue("policyRoutes"))
 
-	bgpEnabled, bgpConnect, bgpPeerIP, bgpPeerPort, bgpPeerASN, bgpRouteFilters, bgpExportFilters := parsePeerBGPForm(r)
+	bgpEnabled, bgpConnect, bgpRedistributeConnected, bgpPeerIP, bgpPeerPort, bgpPeerASN, bgpRouteFilters, bgpExportFilters := parsePeerBGPForm(r)
 
 	id, err := newPeerID()
 	if err != nil {
@@ -184,33 +184,34 @@ func (h *handler) CreatePeer(w http.ResponseWriter, r *http.Request) {
 
 	now := time.Now().UTC()
 	peer := models.Peer{
-		ID:                  id,
-		Name:                strings.TrimSpace(r.FormValue("name")),
-		PrivateKey:          privKey,
-		PublicKey:           pubKey,
-		PresharedKey:        psk,
-		AllowedIPs:          strings.TrimSpace(r.FormValue("allowedIPs")),
-		Endpoint:            strings.TrimSpace(r.FormValue("endpoint")),
-		PersistentKeepalive: uint16(keepalive),
-		DNS:                 strings.TrimSpace(r.FormValue("dns")),
-		ClientAllowedIPs:    strings.TrimSpace(r.FormValue("clientAllowedIPs")),
-		IsExitNode:          isExitNode,
-		ExitNodeID:          exitNodeID,
-		ExitNodeAllowAll:    exitNodeAllowAll,
-		ExitNodeRoutes:      exitNodeRoutes,
-		AdvertisedRoutes:    advertisedRoutes,
-		PolicyRoutes:        policyRoutes,
-		StrictPolicyRouting: r.FormValue("strictPolicyRouting") == "on",
-		BGPEnabled:          bgpEnabled,
-		BGPConnect:          bgpConnect,
-		BGPPeerIP:           bgpPeerIP,
-		BGPPeerPort:         bgpPeerPort,
-		BGPPeerASN:          bgpPeerASN,
-		BGPRouteFilters:     bgpRouteFilters,
-		BGPExportFilters:    bgpExportFilters,
-		Enabled:             r.FormValue("enabled") == "on",
-		CreatedAt:           now,
-		UpdatedAt:           now,
+		ID:                       id,
+		Name:                     strings.TrimSpace(r.FormValue("name")),
+		PrivateKey:               privKey,
+		PublicKey:                pubKey,
+		PresharedKey:             psk,
+		AllowedIPs:               strings.TrimSpace(r.FormValue("allowedIPs")),
+		Endpoint:                 strings.TrimSpace(r.FormValue("endpoint")),
+		PersistentKeepalive:      uint16(keepalive),
+		DNS:                      strings.TrimSpace(r.FormValue("dns")),
+		ClientAllowedIPs:         strings.TrimSpace(r.FormValue("clientAllowedIPs")),
+		IsExitNode:               isExitNode,
+		ExitNodeID:               exitNodeID,
+		ExitNodeAllowAll:         exitNodeAllowAll,
+		ExitNodeRoutes:           exitNodeRoutes,
+		AdvertisedRoutes:         advertisedRoutes,
+		PolicyRoutes:             policyRoutes,
+		StrictPolicyRouting:      r.FormValue("strictPolicyRouting") == "on",
+		BGPEnabled:               bgpEnabled,
+		BGPConnect:               bgpConnect,
+		BGPRedistributeConnected: bgpRedistributeConnected,
+		BGPPeerIP:                bgpPeerIP,
+		BGPPeerPort:              bgpPeerPort,
+		BGPPeerASN:               bgpPeerASN,
+		BGPRouteFilters:          bgpRouteFilters,
+		BGPExportFilters:         bgpExportFilters,
+		Enabled:                  r.FormValue("enabled") == "on",
+		CreatedAt:                now,
+		UpdatedAt:                now,
 	}
 
 	writeErr := h.store.Write(func(cfg *models.AppConfig) error {
@@ -284,7 +285,7 @@ func (h *handler) UpdatePeer(w http.ResponseWriter, r *http.Request) {
 	advertisedRoutes := parseRouteList(r.FormValue("advertisedRoutes"))
 	policyRoutes := parseRouteList(r.FormValue("policyRoutes"))
 
-	bgpEnabled, bgpConnect, bgpPeerIP, bgpPeerPort, bgpPeerASN, bgpRouteFilters, bgpExportFilters := parsePeerBGPForm(r)
+	bgpEnabled, bgpConnect, bgpRedistributeConnected, bgpPeerIP, bgpPeerPort, bgpPeerASN, bgpRouteFilters, bgpExportFilters := parsePeerBGPForm(r)
 
 	// Holds what the user submitted, so a rejected edit can be shown back to them
 	// (the store rolls its own copy back on error).
@@ -313,6 +314,7 @@ func (h *handler) UpdatePeer(w http.ResponseWriter, r *http.Request) {
 		p.StrictPolicyRouting = r.FormValue("strictPolicyRouting") == "on"
 		p.BGPEnabled = bgpEnabled
 		p.BGPConnect = bgpConnect
+		p.BGPRedistributeConnected = bgpRedistributeConnected
 		p.BGPPeerIP = bgpPeerIP
 		p.BGPPeerPort = bgpPeerPort
 		p.BGPPeerASN = bgpPeerASN
@@ -539,9 +541,10 @@ func (h *handler) listPeersOOB(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func parsePeerBGPForm(r *http.Request) (bgpEnabled, bgpConnect bool, bgpPeerIP string, bgpPeerPort uint16, bgpPeerASN uint32, bgpRouteFilters, bgpExportFilters []models.RouteFilter) {
+func parsePeerBGPForm(r *http.Request) (bgpEnabled, bgpConnect, bgpRedistributeConnected bool, bgpPeerIP string, bgpPeerPort uint16, bgpPeerASN uint32, bgpRouteFilters, bgpExportFilters []models.RouteFilter) {
 	bgpEnabled = r.FormValue("bgpEnabled") == "on"
 	bgpConnect = r.FormValue("bgpConnect") == "on"
+	bgpRedistributeConnected = r.FormValue("bgpRedistributeConnected") == "on"
 	bgpPeerIP = strings.TrimSpace(r.FormValue("bgpPeerIP"))
 
 	port, _ := strconv.ParseUint(r.FormValue("bgpPeerPort"), 10, 16)

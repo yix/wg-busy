@@ -14,6 +14,7 @@ import (
 	bnet "github.com/bio-routing/bio-rd/net"
 	"github.com/bio-routing/bio-rd/protocols/bgp/server"
 	"github.com/bio-routing/bio-rd/protocols/kernel"
+	"github.com/bio-routing/bio-rd/route"
 	"github.com/bio-routing/bio-rd/routingtable/filter"
 	"github.com/bio-routing/bio-rd/routingtable/filter/actions"
 	"github.com/bio-routing/bio-rd/routingtable/vrf"
@@ -23,10 +24,11 @@ import (
 )
 
 var (
-	mu           sync.Mutex
-	active       *bgpRuntime
-	newKernel    = kernel.New
-	newBGPServer = server.NewBGPServer
+	mu                 sync.Mutex
+	active             *bgpRuntime
+	newKernel          = kernel.New
+	newBGPServer       = server.NewBGPServer
+	interfaceAddresses = systemInterfaceAddresses
 	// ztAddressProvider reports the node's own addresses on joined ZeroTier
 	// networks, so the BGP listener can also bind to them. Set via
 	// SetZeroTierAddressProvider; nil until wired up (e.g. in tests).
@@ -55,11 +57,40 @@ type bgpServerState struct {
 }
 
 type bgpRuntime struct {
-	server    server.BGPServer
-	vrfs      *vrf.VRFRegistry
-	kernel    *kernel.Kernel
-	listeners *listenerManager
-	state     bgpServerState
+	server      server.BGPServer
+	vrfs        *vrf.VRFRegistry
+	kernel      *kernel.Kernel
+	listeners   *listenerManager
+	state       bgpServerState
+	localRoutes map[string]localRoute
+}
+
+type localRoute struct {
+	prefix *bnet.Prefix
+	path   *route.Path
+}
+
+// bgpKernelClient keeps locally originated paths in the BGP RIB without
+// attempting to install routes that already exist on the host back into the
+// kernel. Learned BGP paths continue to be installed as before.
+type bgpKernelClient struct{ *kernel.Kernel }
+
+func (c bgpKernelClient) AddPathInitialDump(prefix *bnet.Prefix, path *route.Path) error {
+	return c.AddPath(prefix, path)
+}
+
+func (c bgpKernelClient) AddPath(prefix *bnet.Prefix, path *route.Path) error {
+	if path.Type != route.BGPPathType {
+		return nil
+	}
+	return c.Kernel.AddPath(prefix, path)
+}
+
+func (c bgpKernelClient) RemovePath(prefix *bnet.Prefix, path *route.Path) bool {
+	if path.Type != route.BGPPathType {
+		return true
+	}
+	return c.Kernel.RemovePath(prefix, path)
 }
 
 // routerIDFromAddress parses a WireGuard address CIDR (e.g. "10.0.0.1/24") and
@@ -111,7 +142,7 @@ func Configure(cfg *models.AppConfig) error {
 		return nil
 	}
 
-	return reconcilePeers(active, cfg)
+	return applyRuntimeConfig(active, cfg)
 }
 
 func stateFor(cfg models.ServerConfig, routerID uint32) bgpServerState {
@@ -156,14 +187,14 @@ func extraListenHosts(primary string) []string {
 	return hosts
 }
 
-func desiredPeers(cfg *models.AppConfig, defVRF *vrf.VRF, routerID uint32) (map[bnet.IP]server.PeerConfig, error) {
+func desiredPeers(cfg *models.AppConfig, defVRF *vrf.VRF, routerID uint32, localPrefixes []string) (map[bnet.IP]server.PeerConfig, error) {
 	desired := make(map[bnet.IP]server.PeerConfig)
 
 	for _, p := range cfg.Peers {
 		if !p.Enabled || !p.BGPEnabled {
 			continue
 		}
-		bPeerIP, peerCfg, err := buildPeerConfig(cfg, defVRF, routerID, p.Name, p.BGPConnect, p.BGPPeerIP, p.BGPPeerPort, p.BGPPeerASN, p.BGPRouteFilters, p.BGPExportFilters)
+		bPeerIP, peerCfg, err := buildPeerConfig(cfg, defVRF, routerID, p.Name, p.BGPConnect, p.BGPRedistributeConnected, p.BGPPeerIP, p.BGPPeerPort, p.BGPPeerASN, p.BGPRouteFilters, p.BGPExportFilters, localPrefixes)
 		if err != nil {
 			return nil, err
 		}
@@ -177,7 +208,7 @@ func desiredPeers(cfg *models.AppConfig, defVRF *vrf.VRF, routerID uint32) (map[
 		if !p.Enabled {
 			continue
 		}
-		bPeerIP, peerCfg, err := buildPeerConfig(cfg, defVRF, routerID, p.Name, p.Connect, p.PeerIP, p.PeerPort, p.PeerASN, p.RouteFilters, p.ExportFilters)
+		bPeerIP, peerCfg, err := buildPeerConfig(cfg, defVRF, routerID, p.Name, p.Connect, p.RedistributeConnected, p.PeerIP, p.PeerPort, p.PeerASN, p.RouteFilters, p.ExportFilters, localPrefixes)
 		if err != nil {
 			return nil, err
 		}
@@ -192,7 +223,7 @@ func desiredPeers(cfg *models.AppConfig, defVRF *vrf.VRF, routerID uint32) (map[
 
 // buildPeerConfig builds a bio-rd peer config for a single BGP session, shared
 // by WireGuard-attached peers and standalone custom peers.
-func buildPeerConfig(cfg *models.AppConfig, defVRF *vrf.VRF, routerID uint32, name string, connect bool, peerIP string, peerPort uint16, peerASN uint32, routeFilters, exportFilters []models.RouteFilter) (bnet.IP, server.PeerConfig, error) {
+func buildPeerConfig(cfg *models.AppConfig, defVRF *vrf.VRF, routerID uint32, name string, connect, redistributeConnected bool, peerIP string, peerPort uint16, peerASN uint32, routeFilters, exportFilters []models.RouteFilter, localPrefixes []string) (bnet.IP, server.PeerConfig, error) {
 	bPeerIP, err := bnet.IPFromString(peerIP)
 	if err != nil {
 		return bnet.IP{}, server.PeerConfig{}, fmt.Errorf("peer %q has invalid BGP peer IP %q: %w", name, peerIP, err)
@@ -236,7 +267,7 @@ func buildPeerConfig(cfg *models.AppConfig, defVRF *vrf.VRF, routerID uint32, na
 	peerCfg.PeerAddress = peerCfg.PeerAddress.Dedup()
 
 	importFilter := buildFilterChain("import", routeFilters)
-	exportFilter := buildFilterChain("export", exportFilters)
+	exportFilter := buildExportFilterChain(exportFilters, redistributeConnected, localPrefixes)
 
 	afi := &server.AddressFamilyConfig{
 		ImportFilterChain: importFilter,
@@ -254,9 +285,9 @@ func buildPeerConfig(cfg *models.AppConfig, defVRF *vrf.VRF, routerID uint32, na
 	return bPeerIP, peerCfg, nil
 }
 
-func reconcilePeers(runtime *bgpRuntime, cfg *models.AppConfig) error {
+func reconcilePeers(runtime *bgpRuntime, cfg *models.AppConfig, localPrefixes []string) error {
 	defVRF := runtime.vrfs.GetVRFByName(vrf.DefaultVRFName)
-	desired, err := desiredPeers(cfg, defVRF, runtime.state.routerID)
+	desired, err := desiredPeers(cfg, defVRF, runtime.state.routerID, localPrefixes)
 	if err != nil {
 		return err
 	}
@@ -322,8 +353,9 @@ func startRuntime(cfg *models.AppConfig, state bgpServerState) (*bgpRuntime, err
 	if err != nil {
 		return nil, fmt.Errorf("failed to init kernel routing: %w", err)
 	}
-	defVRF.IPv4UnicastRIB().Register(kernelRoutes)
-	defVRF.IPv6UnicastRIB().Register(kernelRoutes)
+	kernelClient := bgpKernelClient{Kernel: kernelRoutes}
+	defVRF.IPv4UnicastRIB().Register(kernelClient)
+	defVRF.IPv6UnicastRIB().Register(kernelClient)
 
 	listenAddrs := []string{net.JoinHostPort(state.listenAddress, fmt.Sprint(state.listenPort))}
 	for _, host := range strings.Split(state.extraListen, ",") {
@@ -344,9 +376,16 @@ func startRuntime(cfg *models.AppConfig, state bgpServerState) (*bgpRuntime, err
 		DefaultVRF:       defVRF,
 		ListenAddrsByVRF: listenAddrsByVRF,
 	}
-	runtime := &bgpRuntime{server: newBGPServer(srvCfg), vrfs: registry, kernel: kernelRoutes, listeners: listeners, state: state}
+	runtime := &bgpRuntime{
+		server:      newBGPServer(srvCfg),
+		vrfs:        registry,
+		kernel:      kernelRoutes,
+		listeners:   listeners,
+		state:       state,
+		localRoutes: make(map[string]localRoute),
+	}
 	runtime.server.SetListenerManager(listeners)
-	if err := reconcilePeers(runtime, cfg); err != nil {
+	if err := applyRuntimeConfig(runtime, cfg); err != nil {
 		_ = runtime.shutdown()
 		return nil, err
 	}
@@ -418,4 +457,172 @@ func buildFilterChain(kind string, filters []models.RouteFilter) filter.Chain {
 	terms = append(terms, filter.NewTerm("default-reject", []*filter.TermCondition{}, []actions.Action{&actions.RejectAction{}}))
 
 	return filter.Chain{filter.NewFilter(kind+"-filter", terms)}
+}
+
+func buildExportFilterChain(filters []models.RouteFilter, redistributeConnected bool, localPrefixes []string) filter.Chain {
+	chain := buildFilterChain("export", filters)
+	if redistributeConnected {
+		return chain
+	}
+
+	terms := make([]*filter.Term, 0, len(localPrefixes))
+	for i, prefix := range localPrefixes {
+		parsed, err := bnet.PrefixFromString(prefix)
+		if err != nil {
+			continue
+		}
+		condition := filter.NewTermConditionWithRouteFilters(filter.NewRouteFilter(parsed.Dedup(), filter.NewExactMatcher()))
+		terms = append(terms, filter.NewTerm(
+			fmt.Sprintf("reject-local-connected-%d", i),
+			[]*filter.TermCondition{condition},
+			[]actions.Action{&actions.RejectAction{}},
+		))
+	}
+	if len(terms) == 0 {
+		return chain
+	}
+	rejectConnected := filter.NewFilter("reject-local-connected", terms)
+	return append(filter.Chain{rejectConnected}, chain...)
+}
+
+func wantsLocalRoutes(cfg *models.AppConfig) bool {
+	for _, peer := range cfg.Peers {
+		if peer.Enabled && peer.BGPEnabled && peer.BGPRedistributeConnected {
+			return true
+		}
+	}
+	for _, peer := range cfg.BGPPeers {
+		if peer.Enabled && peer.RedistributeConnected {
+			return true
+		}
+	}
+	return false
+}
+
+func desiredLocalPrefixes(cfg *models.AppConfig) ([]string, error) {
+	if wantsLocalRoutes(cfg) {
+		addresses, err := interfaceAddresses()
+		if err != nil {
+			return nil, fmt.Errorf("discover local and connected BGP routes: %w", err)
+		}
+		return localAndConnectedPrefixes(addresses), nil
+	}
+	return nil, nil
+}
+
+func applyRuntimeConfig(runtime *bgpRuntime, cfg *models.AppConfig) error {
+	prefixes, err := desiredLocalPrefixes(cfg)
+	if err != nil {
+		return err
+	}
+	desired := make(map[string]bool, len(prefixes))
+	for _, prefix := range prefixes {
+		desired[prefix] = true
+	}
+
+	defVRF := runtime.vrfs.GetVRFByName(vrf.DefaultVRFName)
+	// Withdraw stale routes before relaxing any peer export policy.
+	for prefix, existing := range runtime.localRoutes {
+		if desired[prefix] {
+			continue
+		}
+		localRIB(defVRF, existing.prefix).RemovePath(existing.prefix, existing.path)
+		delete(runtime.localRoutes, prefix)
+	}
+
+	if err := reconcilePeers(runtime, cfg, prefixes); err != nil {
+		return err
+	}
+
+	// Install new routes only after every opted-out peer has its deny policy.
+	for _, prefix := range prefixes {
+		if _, exists := runtime.localRoutes[prefix]; exists {
+			continue
+		}
+		parsed, err := bnet.PrefixFromString(prefix)
+		if err != nil {
+			return fmt.Errorf("parse local BGP route %q: %w", prefix, err)
+		}
+		path := &route.Path{Type: route.StaticPathType, LTime: uint32(time.Now().Unix())}
+		if err := localRIB(defVRF, parsed).AddPath(parsed, path); err != nil {
+			return fmt.Errorf("add local BGP route %s: %w", prefix, err)
+		}
+		runtime.localRoutes[prefix] = localRoute{prefix: parsed, path: path}
+	}
+	return nil
+}
+
+func localRIB(defVRF *vrf.VRF, prefix *bnet.Prefix) interface {
+	AddPath(*bnet.Prefix, *route.Path) error
+	RemovePath(*bnet.Prefix, *route.Path) bool
+} {
+	if prefix.Addr().IsIPv4() {
+		return defVRF.IPv4UnicastRIB()
+	}
+	return defVRF.IPv6UnicastRIB()
+}
+
+func systemInterfaceAddresses() ([]net.Addr, error) {
+	interfaces, err := net.Interfaces()
+	if err != nil {
+		return nil, err
+	}
+
+	var addresses []net.Addr
+	for _, iface := range interfaces {
+		if iface.Flags&net.FlagUp == 0 {
+			continue
+		}
+		ifaceAddresses, err := iface.Addrs()
+		if err != nil {
+			return nil, fmt.Errorf("list addresses for %s: %w", iface.Name, err)
+		}
+		addresses = append(addresses, ifaceAddresses...)
+	}
+	return addresses, nil
+}
+
+func localAndConnectedPrefixes(addresses []net.Addr) []string {
+	seen := make(map[string]bool)
+	for _, address := range addresses {
+		var ip net.IP
+		var mask net.IPMask
+		switch address := address.(type) {
+		case *net.IPNet:
+			ip, mask = address.IP, address.Mask
+		case *net.IPAddr:
+			ip = address.IP
+			if ip.To4() != nil {
+				mask = net.CIDRMask(32, 32)
+			} else {
+				mask = net.CIDRMask(128, 128)
+			}
+		default:
+			var network *net.IPNet
+			var err error
+			ip, network, err = net.ParseCIDR(address.String())
+			if err != nil {
+				continue
+			}
+			mask = network.Mask
+		}
+
+		if ip.IsUnspecified() || ip.IsLoopback() || ip.IsMulticast() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() {
+			continue
+		}
+
+		ones, bits := mask.Size()
+		if ones < 0 || (bits != 32 && bits != 128) {
+			continue
+		}
+		seen[(&net.IPNet{IP: ip.Mask(mask), Mask: mask}).String()] = true
+		seen[fmt.Sprintf("%s/%d", ip.String(), bits)] = true
+	}
+
+	prefixes := make([]string, 0, len(seen))
+	for prefix := range seen {
+		prefixes = append(prefixes, prefix)
+	}
+	sort.Strings(prefixes)
+	return prefixes
 }

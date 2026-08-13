@@ -107,13 +107,14 @@ type RouteFilter struct {
 // BGPPeer is a standalone BGP session that is not tied to a WireGuard peer —
 // e.g. a route reflector or router reachable directly (not over a tunnel).
 type BGPPeer struct {
-	ID       string `yaml:"id"`
-	Name     string `yaml:"name"`
-	Enabled  bool   `yaml:"enabled"`
-	Connect  bool   `yaml:"connect,omitempty"`
-	PeerIP   string `yaml:"peerIP"`
-	PeerPort uint16 `yaml:"peerPort,omitempty"`
-	PeerASN  uint32 `yaml:"peerAsn"`
+	ID                    string `yaml:"id"`
+	Name                  string `yaml:"name"`
+	Enabled               bool   `yaml:"enabled"`
+	Connect               bool   `yaml:"connect,omitempty"`
+	RedistributeConnected bool   `yaml:"redistributeConnected,omitempty"`
+	PeerIP                string `yaml:"peerIP"`
+	PeerPort              uint16 `yaml:"peerPort,omitempty"`
+	PeerASN               uint32 `yaml:"peerAsn"`
 	// RouteFilters governs which prefixes received from this peer are accepted.
 	RouteFilters []RouteFilter `yaml:"routeFilters,omitempty"`
 	// ExportFilters governs which locally known prefixes are advertised to this peer.
@@ -203,11 +204,13 @@ type Peer struct {
 	Enabled              bool     `yaml:"enabled"`
 
 	// BGP
-	BGPEnabled  bool   `yaml:"bgpEnabled,omitempty"`
-	BGPConnect  bool   `yaml:"bgpConnect,omitempty"`
-	BGPPeerIP   string `yaml:"bgpPeerIP,omitempty"`
-	BGPPeerPort uint16 `yaml:"bgpPeerPort,omitempty"`
-	BGPPeerASN  uint32 `yaml:"bgpPeerAsn,omitempty"`
+	BGPEnabled bool `yaml:"bgpEnabled,omitempty"`
+	BGPConnect bool `yaml:"bgpConnect,omitempty"`
+	// BGPRedistributeConnected advertises this host's local and connected routes.
+	BGPRedistributeConnected bool   `yaml:"bgpRedistributeConnected,omitempty"`
+	BGPPeerIP                string `yaml:"bgpPeerIP,omitempty"`
+	BGPPeerPort              uint16 `yaml:"bgpPeerPort,omitempty"`
+	BGPPeerASN               uint32 `yaml:"bgpPeerAsn,omitempty"`
 	// BGPRouteFilters governs which prefixes received from this peer are accepted.
 	BGPRouteFilters []RouteFilter `yaml:"bgpRouteFilters,omitempty"`
 	// BGPExportFilters governs which locally known prefixes are advertised to this peer.

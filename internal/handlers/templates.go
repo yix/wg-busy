@@ -296,6 +296,11 @@ var templates = template.Must(template.New("").Funcs(template.FuncMap{
                     <label>
                         <input type="checkbox" name="bgpConnect" {{if .Peer.BGPConnect}}checked{{end}} title="Actively initiate connection to the peer"> Connect
                     </label>
+                    <label>
+                        <input type="checkbox" name="bgpRedistributeConnected" {{if .Peer.BGPRedistributeConnected}}checked{{end}}>
+                        Redistribute local and connected routes
+                        <small>Advertise this host's active interface addresses and connected networks. Advertised prefix filters still apply.</small>
+                    </label>
                     <div class="grid">
                         <label>
                             Peer BGP IP *
@@ -780,6 +785,11 @@ var templates = template.Must(template.New("").Funcs(template.FuncMap{
             <input type="hidden" name="bgpEnabled" value="on">
             <label>
                 <input type="checkbox" name="bgpConnect" {{if .Peer.Connect}}checked{{end}} title="Actively initiate connection to the peer"> Connect
+            </label>
+            <label>
+                <input type="checkbox" name="bgpRedistributeConnected" {{if .Peer.RedistributeConnected}}checked{{end}}>
+                Redistribute local and connected routes
+                <small>Advertise this host's active interface addresses and connected networks. Advertised prefix filters still apply.</small>
             </label>
 
             <div class="grid">
