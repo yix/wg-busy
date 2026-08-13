@@ -86,22 +86,24 @@ func (h *handler) CreateBGPPeer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	_, bgpConnect, bgpRedistributeConnected, bgpPeerIP, bgpPeerPort, bgpPeerASN, bgpRouteFilters, bgpExportFilters := parsePeerBGPForm(r)
+	_, bgpConnect, bgpRedistributeConnected, bgpMaxReceivedPrefixLength, bgpMaxAdvertisedPrefixLength, bgpPeerIP, bgpPeerPort, bgpPeerASN, bgpRouteFilters, bgpExportFilters := parsePeerBGPForm(r)
 
 	now := time.Now().UTC()
 	peer := models.BGPPeer{
-		ID:                    id,
-		Name:                  strings.TrimSpace(r.FormValue("name")),
-		Enabled:               r.FormValue("enabled") == "on",
-		Connect:               bgpConnect,
-		RedistributeConnected: bgpRedistributeConnected,
-		PeerIP:                bgpPeerIP,
-		PeerPort:              bgpPeerPort,
-		PeerASN:               bgpPeerASN,
-		RouteFilters:          bgpRouteFilters,
-		ExportFilters:         bgpExportFilters,
-		CreatedAt:             now,
-		UpdatedAt:             now,
+		ID:                        id,
+		Name:                      strings.TrimSpace(r.FormValue("name")),
+		Enabled:                   r.FormValue("enabled") == "on",
+		Connect:                   bgpConnect,
+		RedistributeConnected:     bgpRedistributeConnected,
+		MaxReceivedPrefixLength:   bgpMaxReceivedPrefixLength,
+		MaxAdvertisedPrefixLength: bgpMaxAdvertisedPrefixLength,
+		PeerIP:                    bgpPeerIP,
+		PeerPort:                  bgpPeerPort,
+		PeerASN:                   bgpPeerASN,
+		RouteFilters:              bgpRouteFilters,
+		ExportFilters:             bgpExportFilters,
+		CreatedAt:                 now,
+		UpdatedAt:                 now,
 	}
 
 	writeErr := h.store.Write(func(cfg *models.AppConfig) error {
@@ -133,7 +135,7 @@ func (h *handler) UpdateBGPPeer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	_, bgpConnect, bgpRedistributeConnected, bgpPeerIP, bgpPeerPort, bgpPeerASN, bgpRouteFilters, bgpExportFilters := parsePeerBGPForm(r)
+	_, bgpConnect, bgpRedistributeConnected, bgpMaxReceivedPrefixLength, bgpMaxAdvertisedPrefixLength, bgpPeerIP, bgpPeerPort, bgpPeerASN, bgpRouteFilters, bgpExportFilters := parsePeerBGPForm(r)
 
 	var submitted models.BGPPeer
 
@@ -147,6 +149,8 @@ func (h *handler) UpdateBGPPeer(w http.ResponseWriter, r *http.Request) {
 		p.Enabled = r.FormValue("enabled") == "on"
 		p.Connect = bgpConnect
 		p.RedistributeConnected = bgpRedistributeConnected
+		p.MaxReceivedPrefixLength = bgpMaxReceivedPrefixLength
+		p.MaxAdvertisedPrefixLength = bgpMaxAdvertisedPrefixLength
 		p.PeerIP = bgpPeerIP
 		p.PeerPort = bgpPeerPort
 		p.PeerASN = bgpPeerASN

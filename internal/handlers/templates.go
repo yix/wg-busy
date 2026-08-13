@@ -319,6 +319,21 @@ var templates = template.Must(template.New("").Funcs(template.FuncMap{
                             {{range .ValidationErrors}}{{if eq .Field "bgpPeerPort"}}<small class="field-error">{{.Message}}</small>{{end}}{{end}}
                         </label>
                     </div>
+
+                    <div class="grid">
+                        <label>
+                            Max received prefix length
+                            <input type="number" name="bgpMaxReceivedPrefixLength" value="{{if .Peer.BGPMaxReceivedPrefixLength}}{{.Peer.BGPMaxReceivedPrefixLength}}{{end}}" min="0" max="128" placeholder="Unlimited" {{if .ValidationErrors.HasField "bgpMaxReceivedPrefixLength"}}aria-invalid="true"{{end}}>
+                            <small>Inclusive. For example, 24 accepts /24 and rejects /25 or longer. Leave blank or use 0 for unlimited.</small>
+                            {{range .ValidationErrors}}{{if eq .Field "bgpMaxReceivedPrefixLength"}}<small class="field-error">{{.Message}}</small>{{end}}{{end}}
+                        </label>
+                        <label>
+                            Max advertised prefix length
+                            <input type="number" name="bgpMaxAdvertisedPrefixLength" value="{{if .Peer.BGPMaxAdvertisedPrefixLength}}{{.Peer.BGPMaxAdvertisedPrefixLength}}{{end}}" min="0" max="128" placeholder="Unlimited" {{if .ValidationErrors.HasField "bgpMaxAdvertisedPrefixLength"}}aria-invalid="true"{{end}}>
+                            <small>Inclusive. Prefixes longer than this value are not advertised. Leave blank or use 0 for unlimited.</small>
+                            {{range .ValidationErrors}}{{if eq .Field "bgpMaxAdvertisedPrefixLength"}}<small class="field-error">{{.Message}}</small>{{end}}{{end}}
+                        </label>
+                    </div>
                     
                     <div style="margin-top: 1rem;">
                         <label>Received Prefix Filters</label>
@@ -754,7 +769,7 @@ var templates = template.Must(template.New("").Funcs(template.FuncMap{
     <article class="flex-row" style="align-items:center;">
         <div>
             <strong>{{.Name}}</strong> {{if not .Enabled}}<span class="badge badge-warn">Disabled</span>{{end}}
-            <div><small class="text-muted">{{.PeerIP}} (AS{{.PeerASN}}) &middot; {{if .Connect}}active{{else}}passive{{end}}{{if .RedistributeConnected}} &middot; local/connected routes{{end}}{{if .RouteFilters}} &middot; {{len .RouteFilters}} received filter(s){{end}}{{if .ExportFilters}} &middot; {{len .ExportFilters}} advertised filter(s){{end}}</small></div>
+            <div><small class="text-muted">{{.PeerIP}} (AS{{.PeerASN}}) &middot; {{if .Connect}}active{{else}}passive{{end}}{{if .RedistributeConnected}} &middot; local/connected routes{{end}}{{if .MaxReceivedPrefixLength}} &middot; received max /{{.MaxReceivedPrefixLength}}{{end}}{{if .MaxAdvertisedPrefixLength}} &middot; advertised max /{{.MaxAdvertisedPrefixLength}}{{end}}{{if .RouteFilters}} &middot; {{len .RouteFilters}} received filter(s){{end}}{{if .ExportFilters}} &middot; {{len .ExportFilters}} advertised filter(s){{end}}</small></div>
         </div>
         <div class="btn-group">
             <button class="btn btn-outline" style="width:auto" hx-get="bgp/peers/{{.ID}}/edit" hx-target="#modal-container" hx-swap="innerHTML">Edit</button>
@@ -813,6 +828,21 @@ var templates = template.Must(template.New("").Funcs(template.FuncMap{
                     <input type="number" name="bgpPeerPort" value="179" min="179" max="179" readonly {{if .ValidationErrors.HasField "bgpPeerPort"}}aria-invalid="true"{{end}}>
                     <small>The embedded BGP engine currently supports peer port 179.</small>
                     {{range .ValidationErrors}}{{if eq .Field "bgpPeerPort"}}<small class="field-error">{{.Message}}</small>{{end}}{{end}}
+                </label>
+            </div>
+
+            <div class="grid">
+                <label>
+                    Max received prefix length
+                    <input type="number" name="bgpMaxReceivedPrefixLength" value="{{if .Peer.MaxReceivedPrefixLength}}{{.Peer.MaxReceivedPrefixLength}}{{end}}" min="0" max="128" placeholder="Unlimited" {{if .ValidationErrors.HasField "bgpMaxReceivedPrefixLength"}}aria-invalid="true"{{end}}>
+                    <small>Inclusive. For example, 24 accepts /24 and rejects /25 or longer. Leave blank or use 0 for unlimited.</small>
+                    {{range .ValidationErrors}}{{if eq .Field "bgpMaxReceivedPrefixLength"}}<small class="field-error">{{.Message}}</small>{{end}}{{end}}
+                </label>
+                <label>
+                    Max advertised prefix length
+                    <input type="number" name="bgpMaxAdvertisedPrefixLength" value="{{if .Peer.MaxAdvertisedPrefixLength}}{{.Peer.MaxAdvertisedPrefixLength}}{{end}}" min="0" max="128" placeholder="Unlimited" {{if .ValidationErrors.HasField "bgpMaxAdvertisedPrefixLength"}}aria-invalid="true"{{end}}>
+                    <small>Inclusive. Prefixes longer than this value are not advertised. Leave blank or use 0 for unlimited.</small>
+                    {{range .ValidationErrors}}{{if eq .Field "bgpMaxAdvertisedPrefixLength"}}<small class="field-error">{{.Message}}</small>{{end}}{{end}}
                 </label>
             </div>
 

@@ -108,14 +108,16 @@ type RouteFilter struct {
 // BGPPeer is a standalone BGP session that is not tied to a WireGuard peer —
 // e.g. a route reflector or router reachable directly (not over a tunnel).
 type BGPPeer struct {
-	ID                    string `yaml:"id"`
-	Name                  string `yaml:"name"`
-	Enabled               bool   `yaml:"enabled"`
-	Connect               bool   `yaml:"connect,omitempty"`
-	RedistributeConnected bool   `yaml:"redistributeConnected,omitempty"`
-	PeerIP                string `yaml:"peerIP"`
-	PeerPort              uint16 `yaml:"peerPort,omitempty"`
-	PeerASN               uint32 `yaml:"peerAsn"`
+	ID                        string `yaml:"id"`
+	Name                      string `yaml:"name"`
+	Enabled                   bool   `yaml:"enabled"`
+	Connect                   bool   `yaml:"connect,omitempty"`
+	RedistributeConnected     bool   `yaml:"redistributeConnected,omitempty"`
+	MaxReceivedPrefixLength   uint16 `yaml:"maxReceivedPrefixLength,omitempty"`
+	MaxAdvertisedPrefixLength uint16 `yaml:"maxAdvertisedPrefixLength,omitempty"`
+	PeerIP                    string `yaml:"peerIP"`
+	PeerPort                  uint16 `yaml:"peerPort,omitempty"`
+	PeerASN                   uint32 `yaml:"peerAsn"`
 	// RouteFilters governs which prefixes received from this peer are accepted.
 	RouteFilters []RouteFilter `yaml:"routeFilters,omitempty"`
 	// ExportFilters governs which locally known prefixes are advertised to this peer.
@@ -150,6 +152,12 @@ func (p *BGPPeer) Validate() ValidationErrors {
 
 	if p.PeerASN == 0 {
 		errs = append(errs, ValidationError{Field: "bgpPeerAsn", Message: "required"})
+	}
+	if p.MaxReceivedPrefixLength > 128 {
+		errs = append(errs, ValidationError{Field: "bgpMaxReceivedPrefixLength", Message: "must be between 0 and 128"})
+	}
+	if p.MaxAdvertisedPrefixLength > 128 {
+		errs = append(errs, ValidationError{Field: "bgpMaxAdvertisedPrefixLength", Message: "must be between 0 and 128"})
 	}
 
 	errs = append(errs, validateRouteFilters(p.RouteFilters, "routeFilters")...)
@@ -208,10 +216,12 @@ type Peer struct {
 	BGPEnabled bool `yaml:"bgpEnabled,omitempty"`
 	BGPConnect bool `yaml:"bgpConnect,omitempty"`
 	// BGPRedistributeConnected advertises this host's local and connected routes.
-	BGPRedistributeConnected bool   `yaml:"bgpRedistributeConnected,omitempty"`
-	BGPPeerIP                string `yaml:"bgpPeerIP,omitempty"`
-	BGPPeerPort              uint16 `yaml:"bgpPeerPort,omitempty"`
-	BGPPeerASN               uint32 `yaml:"bgpPeerAsn,omitempty"`
+	BGPRedistributeConnected     bool   `yaml:"bgpRedistributeConnected,omitempty"`
+	BGPMaxReceivedPrefixLength   uint16 `yaml:"bgpMaxReceivedPrefixLength,omitempty"`
+	BGPMaxAdvertisedPrefixLength uint16 `yaml:"bgpMaxAdvertisedPrefixLength,omitempty"`
+	BGPPeerIP                    string `yaml:"bgpPeerIP,omitempty"`
+	BGPPeerPort                  uint16 `yaml:"bgpPeerPort,omitempty"`
+	BGPPeerASN                   uint32 `yaml:"bgpPeerAsn,omitempty"`
 	// BGPRouteFilters governs which prefixes received from this peer are accepted.
 	BGPRouteFilters []RouteFilter `yaml:"bgpRouteFilters,omitempty"`
 	// BGPExportFilters governs which locally known prefixes are advertised to this peer.
@@ -542,6 +552,12 @@ func (p *Peer) Validate(gateways []GatewayNet) ValidationErrors {
 		}
 		if p.BGPPeerASN == 0 {
 			errs = append(errs, ValidationError{Field: "bgpPeerAsn", Message: "required when BGP is enabled"})
+		}
+		if p.BGPMaxReceivedPrefixLength > 128 {
+			errs = append(errs, ValidationError{Field: "bgpMaxReceivedPrefixLength", Message: "must be between 0 and 128"})
+		}
+		if p.BGPMaxAdvertisedPrefixLength > 128 {
+			errs = append(errs, ValidationError{Field: "bgpMaxAdvertisedPrefixLength", Message: "must be between 0 and 128"})
 		}
 
 		errs = append(errs, validateRouteFilters(p.BGPRouteFilters, "bgpRouteFilters")...)

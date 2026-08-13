@@ -311,6 +311,24 @@ func TestValidateConfigRejectsRuntimePeerCollisions(t *testing.T) {
 	})
 }
 
+func TestBGPMaxPrefixLengthValidation(t *testing.T) {
+	peer := validPeer()
+	peer.BGPEnabled = true
+	peer.BGPPeerIP, peer.BGPPeerPort, peer.BGPPeerASN = "10.0.0.2", 179, 64513
+	peer.BGPMaxReceivedPrefixLength = 129
+	peer.BGPMaxAdvertisedPrefixLength = 130
+	errs := peer.Validate(nil)
+	if !errs.HasField("bgpMaxReceivedPrefixLength") || !errs.HasField("bgpMaxAdvertisedPrefixLength") {
+		t.Fatalf("WireGuard BGP max-prefix errors = %v", errs)
+	}
+
+	custom := BGPPeer{Name: "custom", PeerIP: "10.0.0.3", PeerPort: 179, PeerASN: 64514, MaxReceivedPrefixLength: 129, MaxAdvertisedPrefixLength: 130}
+	errs = custom.Validate()
+	if !errs.HasField("bgpMaxReceivedPrefixLength") || !errs.HasField("bgpMaxAdvertisedPrefixLength") {
+		t.Fatalf("custom BGP max-prefix errors = %v", errs)
+	}
+}
+
 func validConfig(peers ...Peer) AppConfig {
 	return AppConfig{
 		Server: ServerConfig{PrivateKey: testKey("A"), ListenPort: 51820, Address: "10.0.0.1/24"},

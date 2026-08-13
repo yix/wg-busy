@@ -194,7 +194,7 @@ func desiredPeers(cfg *models.AppConfig, defVRF *vrf.VRF, routerID uint32, local
 		if !p.Enabled || !p.BGPEnabled {
 			continue
 		}
-		bPeerIP, peerCfg, err := buildPeerConfig(cfg, defVRF, routerID, p.Name, p.BGPConnect, p.BGPRedistributeConnected, p.BGPPeerIP, p.BGPPeerPort, p.BGPPeerASN, p.BGPRouteFilters, p.BGPExportFilters, localPrefixes)
+		bPeerIP, peerCfg, err := buildPeerConfig(cfg, defVRF, routerID, p.Name, p.BGPConnect, p.BGPRedistributeConnected, p.BGPMaxReceivedPrefixLength, p.BGPMaxAdvertisedPrefixLength, p.BGPPeerIP, p.BGPPeerPort, p.BGPPeerASN, p.BGPRouteFilters, p.BGPExportFilters, localPrefixes)
 		if err != nil {
 			return nil, err
 		}
@@ -208,7 +208,7 @@ func desiredPeers(cfg *models.AppConfig, defVRF *vrf.VRF, routerID uint32, local
 		if !p.Enabled {
 			continue
 		}
-		bPeerIP, peerCfg, err := buildPeerConfig(cfg, defVRF, routerID, p.Name, p.Connect, p.RedistributeConnected, p.PeerIP, p.PeerPort, p.PeerASN, p.RouteFilters, p.ExportFilters, localPrefixes)
+		bPeerIP, peerCfg, err := buildPeerConfig(cfg, defVRF, routerID, p.Name, p.Connect, p.RedistributeConnected, p.MaxReceivedPrefixLength, p.MaxAdvertisedPrefixLength, p.PeerIP, p.PeerPort, p.PeerASN, p.RouteFilters, p.ExportFilters, localPrefixes)
 		if err != nil {
 			return nil, err
 		}
@@ -223,13 +223,16 @@ func desiredPeers(cfg *models.AppConfig, defVRF *vrf.VRF, routerID uint32, local
 
 // buildPeerConfig builds a bio-rd peer config for a single BGP session, shared
 // by WireGuard-attached peers and standalone custom peers.
-func buildPeerConfig(cfg *models.AppConfig, defVRF *vrf.VRF, routerID uint32, name string, connect, redistributeConnected bool, peerIP string, peerPort uint16, peerASN uint32, routeFilters, exportFilters []models.RouteFilter, localPrefixes []string) (bnet.IP, server.PeerConfig, error) {
+func buildPeerConfig(cfg *models.AppConfig, defVRF *vrf.VRF, routerID uint32, name string, connect, redistributeConnected bool, maxReceivedPrefixLength, maxAdvertisedPrefixLength uint16, peerIP string, peerPort uint16, peerASN uint32, routeFilters, exportFilters []models.RouteFilter, localPrefixes []string) (bnet.IP, server.PeerConfig, error) {
 	bPeerIP, err := bnet.IPFromString(peerIP)
 	if err != nil {
 		return bnet.IP{}, server.PeerConfig{}, fmt.Errorf("peer %q has invalid BGP peer IP %q: %w", name, peerIP, err)
 	}
 	if peerPort != 179 {
 		return bnet.IP{}, server.PeerConfig{}, fmt.Errorf("peer %q uses unsupported BGP peer port %d; only 179 is supported", name, peerPort)
+	}
+	if maxReceivedPrefixLength > 128 || maxAdvertisedPrefixLength > 128 {
+		return bnet.IP{}, server.PeerConfig{}, fmt.Errorf("peer %q has a max prefix length greater than 128", name)
 	}
 
 	peerCfg := server.PeerConfig{
@@ -266,8 +269,8 @@ func buildPeerConfig(cfg *models.AppConfig, defVRF *vrf.VRF, routerID uint32, na
 	peerCfg.LocalAddress = peerCfg.LocalAddress.Dedup()
 	peerCfg.PeerAddress = peerCfg.PeerAddress.Dedup()
 
-	importFilter := buildFilterChain("import", routeFilters)
-	exportFilter := buildExportFilterChain(exportFilters, redistributeConnected, localPrefixes)
+	importFilter := prependMaxPrefixLengthFilter(buildFilterChain("import", routeFilters), "received", maxReceivedPrefixLength)
+	exportFilter := buildExportFilterChain(exportFilters, redistributeConnected, maxAdvertisedPrefixLength, localPrefixes)
 
 	afi := &server.AddressFamilyConfig{
 		ImportFilterChain: importFilter,
@@ -459,8 +462,8 @@ func buildFilterChain(kind string, filters []models.RouteFilter) filter.Chain {
 	return filter.Chain{filter.NewFilter(kind+"-filter", terms)}
 }
 
-func buildExportFilterChain(filters []models.RouteFilter, redistributeConnected bool, localPrefixes []string) filter.Chain {
-	chain := buildFilterChain("export", filters)
+func buildExportFilterChain(filters []models.RouteFilter, redistributeConnected bool, maxPrefixLength uint16, localPrefixes []string) filter.Chain {
+	chain := prependMaxPrefixLengthFilter(buildFilterChain("export", filters), "advertised", maxPrefixLength)
 	if redistributeConnected {
 		return chain
 	}
@@ -483,6 +486,40 @@ func buildExportFilterChain(filters []models.RouteFilter, redistributeConnected 
 	}
 	rejectConnected := filter.NewFilter("reject-local-connected", terms)
 	return append(filter.Chain{rejectConnected}, chain...)
+}
+
+func prependMaxPrefixLengthFilter(chain filter.Chain, kind string, max uint16) filter.Chain {
+	if max == 0 {
+		return chain
+	}
+
+	var terms []*filter.Term
+	for _, family := range []struct {
+		name   string
+		prefix string
+		limit  uint8
+	}{
+		{name: "ipv4", prefix: "0.0.0.0/0", limit: 32},
+		{name: "ipv6", prefix: "::/0", limit: 128},
+	} {
+		if max >= uint16(family.limit) {
+			continue
+		}
+		prefix, _ := bnet.PrefixFromString(family.prefix)
+		condition := filter.NewTermConditionWithRouteFilters(filter.NewRouteFilter(
+			prefix.Dedup(),
+			filter.NewInRangeMatcher(uint8(max+1), family.limit),
+		))
+		terms = append(terms, filter.NewTerm(
+			fmt.Sprintf("reject-%s-longer-than-%d", family.name, max),
+			[]*filter.TermCondition{condition},
+			[]actions.Action{&actions.RejectAction{}},
+		))
+	}
+	if len(terms) == 0 {
+		return chain
+	}
+	return append(filter.Chain{filter.NewFilter(kind+"-max-prefix-length", terms)}, chain...)
 }
 
 func wantsLocalRoutes(cfg *models.AppConfig) bool {

@@ -75,14 +75,38 @@ func TestVersionEndpointReturnsBuildVersion(t *testing.T) {
 
 func TestCustomBGPPeerFormIncludesRedistributeConnectedSetting(t *testing.T) {
 	var rendered strings.Builder
-	data := bgpPeerFormData{Peer: models.BGPPeer{RedistributeConnected: true}}
+	data := bgpPeerFormData{Peer: models.BGPPeer{
+		RedistributeConnected:     true,
+		MaxReceivedPrefixLength:   24,
+		MaxAdvertisedPrefixLength: 25,
+	}}
 	if err := templates.ExecuteTemplate(&rendered, "bgp-peer-form", data); err != nil {
 		t.Fatal(err)
 	}
 
 	body := rendered.String()
 	if !strings.Contains(body, `name="bgpRedistributeConnected" checked`) ||
-		!strings.Contains(body, "Redistribute local and connected routes") {
-		t.Fatalf("custom BGP peer form is missing redistribute-connected setting: %s", body)
+		!strings.Contains(body, `name="bgpMaxReceivedPrefixLength" value="24"`) ||
+		!strings.Contains(body, `name="bgpMaxAdvertisedPrefixLength" value="25"`) {
+		t.Fatalf("custom BGP peer form is missing BGP policy settings: %s", body)
+	}
+
+	rendered.Reset()
+	wgData := peerFormData{Peer: models.Peer{BGPMaxReceivedPrefixLength: 26, BGPMaxAdvertisedPrefixLength: 27}}
+	if err := templates.ExecuteTemplate(&rendered, "peer-form", wgData); err != nil {
+		t.Fatal(err)
+	}
+	body = rendered.String()
+	if !strings.Contains(body, `name="bgpMaxReceivedPrefixLength" value="26"`) ||
+		!strings.Contains(body, `name="bgpMaxAdvertisedPrefixLength" value="27"`) {
+		t.Fatalf("WireGuard BGP peer form is missing max-prefix-length settings: %s", body)
+	}
+}
+
+func TestParseMaxPrefixLengthPreservesInvalidInputForValidation(t *testing.T) {
+	for input, want := range map[string]uint16{"": 0, "0": 0, "24": 24, "129": 129, "invalid": 129, "70000": 129} {
+		if got := parseMaxPrefixLength(input); got != want {
+			t.Errorf("parseMaxPrefixLength(%q) = %d, want %d", input, got, want)
+		}
 	}
 }

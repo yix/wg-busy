@@ -103,7 +103,7 @@ WG-Busy integrates deeply with `bio-rd` to provide a seamless BGP routing daemon
 - **Server BGP Configuration**: Enable BGP globally and configure the local BGP ASN and Listen addresses directly from the UI.
 - **Per-Peer Sessions**: Turn any WireGuard client into a BGP peer by providing their overlay BGP IP, ASN, and Port.
 - **Dual-Stack Support**: Both IPv4 and IPv6 address families are negotiated over a single BGP session, allowing peers to advertise routes of either family.
-- **Strict Route Filtering**: Dynamically attach "Exact" or "Or Longer" route filters to accept or reject received BGP announcements individually per peer.
+- **Strict Route Filtering**: Dynamically attach "Exact" or "Or Longer" route filters and inclusive maximum prefix lengths to accept or reject received and advertised BGP announcements individually per peer.
 - **Kernel Route Injection**: Accepted routes are immediately injected natively into the Linux host routing table (LocRIB), enabling zero-touch routing configurations.
 - **BGP Dashboard**: A dedicated BGP stats tab displaying real-time peer connection states, uptimes, updates received, and expandable route tables showing each prefix as **Accepted** or **Filtered** (with accepted routes sorted first and filtered routes visually faded).
 

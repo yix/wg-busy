@@ -174,7 +174,7 @@ func (h *handler) CreatePeer(w http.ResponseWriter, r *http.Request) {
 	advertisedRoutes := parseRouteList(r.FormValue("advertisedRoutes"))
 	policyRoutes := parseRouteList(r.FormValue("policyRoutes"))
 
-	bgpEnabled, bgpConnect, bgpRedistributeConnected, bgpPeerIP, bgpPeerPort, bgpPeerASN, bgpRouteFilters, bgpExportFilters := parsePeerBGPForm(r)
+	bgpEnabled, bgpConnect, bgpRedistributeConnected, bgpMaxReceivedPrefixLength, bgpMaxAdvertisedPrefixLength, bgpPeerIP, bgpPeerPort, bgpPeerASN, bgpRouteFilters, bgpExportFilters := parsePeerBGPForm(r)
 
 	id, err := newPeerID()
 	if err != nil {
@@ -184,34 +184,36 @@ func (h *handler) CreatePeer(w http.ResponseWriter, r *http.Request) {
 
 	now := time.Now().UTC()
 	peer := models.Peer{
-		ID:                       id,
-		Name:                     strings.TrimSpace(r.FormValue("name")),
-		PrivateKey:               privKey,
-		PublicKey:                pubKey,
-		PresharedKey:             psk,
-		AllowedIPs:               strings.TrimSpace(r.FormValue("allowedIPs")),
-		Endpoint:                 strings.TrimSpace(r.FormValue("endpoint")),
-		PersistentKeepalive:      uint16(keepalive),
-		DNS:                      strings.TrimSpace(r.FormValue("dns")),
-		ClientAllowedIPs:         strings.TrimSpace(r.FormValue("clientAllowedIPs")),
-		IsExitNode:               isExitNode,
-		ExitNodeID:               exitNodeID,
-		ExitNodeAllowAll:         exitNodeAllowAll,
-		ExitNodeRoutes:           exitNodeRoutes,
-		AdvertisedRoutes:         advertisedRoutes,
-		PolicyRoutes:             policyRoutes,
-		StrictPolicyRouting:      r.FormValue("strictPolicyRouting") == "on",
-		BGPEnabled:               bgpEnabled,
-		BGPConnect:               bgpConnect,
-		BGPRedistributeConnected: bgpRedistributeConnected,
-		BGPPeerIP:                bgpPeerIP,
-		BGPPeerPort:              bgpPeerPort,
-		BGPPeerASN:               bgpPeerASN,
-		BGPRouteFilters:          bgpRouteFilters,
-		BGPExportFilters:         bgpExportFilters,
-		Enabled:                  r.FormValue("enabled") == "on",
-		CreatedAt:                now,
-		UpdatedAt:                now,
+		ID:                           id,
+		Name:                         strings.TrimSpace(r.FormValue("name")),
+		PrivateKey:                   privKey,
+		PublicKey:                    pubKey,
+		PresharedKey:                 psk,
+		AllowedIPs:                   strings.TrimSpace(r.FormValue("allowedIPs")),
+		Endpoint:                     strings.TrimSpace(r.FormValue("endpoint")),
+		PersistentKeepalive:          uint16(keepalive),
+		DNS:                          strings.TrimSpace(r.FormValue("dns")),
+		ClientAllowedIPs:             strings.TrimSpace(r.FormValue("clientAllowedIPs")),
+		IsExitNode:                   isExitNode,
+		ExitNodeID:                   exitNodeID,
+		ExitNodeAllowAll:             exitNodeAllowAll,
+		ExitNodeRoutes:               exitNodeRoutes,
+		AdvertisedRoutes:             advertisedRoutes,
+		PolicyRoutes:                 policyRoutes,
+		StrictPolicyRouting:          r.FormValue("strictPolicyRouting") == "on",
+		BGPEnabled:                   bgpEnabled,
+		BGPConnect:                   bgpConnect,
+		BGPRedistributeConnected:     bgpRedistributeConnected,
+		BGPMaxReceivedPrefixLength:   bgpMaxReceivedPrefixLength,
+		BGPMaxAdvertisedPrefixLength: bgpMaxAdvertisedPrefixLength,
+		BGPPeerIP:                    bgpPeerIP,
+		BGPPeerPort:                  bgpPeerPort,
+		BGPPeerASN:                   bgpPeerASN,
+		BGPRouteFilters:              bgpRouteFilters,
+		BGPExportFilters:             bgpExportFilters,
+		Enabled:                      r.FormValue("enabled") == "on",
+		CreatedAt:                    now,
+		UpdatedAt:                    now,
 	}
 
 	writeErr := h.store.Write(func(cfg *models.AppConfig) error {
@@ -285,7 +287,7 @@ func (h *handler) UpdatePeer(w http.ResponseWriter, r *http.Request) {
 	advertisedRoutes := parseRouteList(r.FormValue("advertisedRoutes"))
 	policyRoutes := parseRouteList(r.FormValue("policyRoutes"))
 
-	bgpEnabled, bgpConnect, bgpRedistributeConnected, bgpPeerIP, bgpPeerPort, bgpPeerASN, bgpRouteFilters, bgpExportFilters := parsePeerBGPForm(r)
+	bgpEnabled, bgpConnect, bgpRedistributeConnected, bgpMaxReceivedPrefixLength, bgpMaxAdvertisedPrefixLength, bgpPeerIP, bgpPeerPort, bgpPeerASN, bgpRouteFilters, bgpExportFilters := parsePeerBGPForm(r)
 
 	// Holds what the user submitted, so a rejected edit can be shown back to them
 	// (the store rolls its own copy back on error).
@@ -315,6 +317,8 @@ func (h *handler) UpdatePeer(w http.ResponseWriter, r *http.Request) {
 		p.BGPEnabled = bgpEnabled
 		p.BGPConnect = bgpConnect
 		p.BGPRedistributeConnected = bgpRedistributeConnected
+		p.BGPMaxReceivedPrefixLength = bgpMaxReceivedPrefixLength
+		p.BGPMaxAdvertisedPrefixLength = bgpMaxAdvertisedPrefixLength
 		p.BGPPeerIP = bgpPeerIP
 		p.BGPPeerPort = bgpPeerPort
 		p.BGPPeerASN = bgpPeerASN
@@ -541,10 +545,12 @@ func (h *handler) listPeersOOB(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func parsePeerBGPForm(r *http.Request) (bgpEnabled, bgpConnect, bgpRedistributeConnected bool, bgpPeerIP string, bgpPeerPort uint16, bgpPeerASN uint32, bgpRouteFilters, bgpExportFilters []models.RouteFilter) {
+func parsePeerBGPForm(r *http.Request) (bgpEnabled, bgpConnect, bgpRedistributeConnected bool, bgpMaxReceivedPrefixLength, bgpMaxAdvertisedPrefixLength uint16, bgpPeerIP string, bgpPeerPort uint16, bgpPeerASN uint32, bgpRouteFilters, bgpExportFilters []models.RouteFilter) {
 	bgpEnabled = r.FormValue("bgpEnabled") == "on"
 	bgpConnect = r.FormValue("bgpConnect") == "on"
 	bgpRedistributeConnected = r.FormValue("bgpRedistributeConnected") == "on"
+	bgpMaxReceivedPrefixLength = parseMaxPrefixLength(r.FormValue("bgpMaxReceivedPrefixLength"))
+	bgpMaxAdvertisedPrefixLength = parseMaxPrefixLength(r.FormValue("bgpMaxAdvertisedPrefixLength"))
 	bgpPeerIP = strings.TrimSpace(r.FormValue("bgpPeerIP"))
 
 	port, _ := strconv.ParseUint(r.FormValue("bgpPeerPort"), 10, 16)
@@ -563,6 +569,18 @@ func parsePeerBGPForm(r *http.Request) (bgpEnabled, bgpConnect, bgpRedistributeC
 	bgpExportFilters = parseRouteFilterForm(r, "exportFilterPrefix[]", "exportFilterMatcher[]", "exportFilterAction[]")
 
 	return
+}
+
+func parseMaxPrefixLength(value string) uint16 {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return 0
+	}
+	length, err := strconv.ParseUint(value, 10, 16)
+	if err != nil || length > 128 {
+		return 129 // Preserve an invalid value so model validation rejects the form.
+	}
+	return uint16(length)
 }
 
 // parseRouteFilterForm reads a route-filter row list from a submitted form,

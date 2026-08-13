@@ -9,6 +9,7 @@ import (
 	bnet "github.com/bio-routing/bio-rd/net"
 	"github.com/bio-routing/bio-rd/protocols/kernel"
 	"github.com/bio-routing/bio-rd/route"
+	"github.com/bio-routing/bio-rd/routingtable/filter"
 	"github.com/bio-routing/bio-rd/routingtable/vrf"
 
 	"github.com/yix/wg-busy/internal/models"
@@ -196,11 +197,65 @@ func TestExportFilterAllowsLocalRoutesOnlyWhenEnabled(t *testing.T) {
 	localPath := &route.Path{Type: route.StaticPathType}
 
 	localPrefixes := []string{"10.0.0.0/24"}
-	if _, rejected := buildExportFilterChain(nil, false, localPrefixes).Process(prefix, localPath); !rejected {
+	if _, rejected := buildExportFilterChain(nil, false, 0, localPrefixes).Process(prefix, localPath); !rejected {
 		t.Fatal("local route was exported without per-peer redistribution enabled")
 	}
-	if _, rejected := buildExportFilterChain(nil, true, localPrefixes).Process(prefix, localPath); rejected {
+	if _, rejected := buildExportFilterChain(nil, true, 0, localPrefixes).Process(prefix, localPath); rejected {
 		t.Fatal("local route was rejected with per-peer redistribution enabled")
+	}
+}
+
+func TestMaxPrefixLengthIsInclusiveForReceivedAndAdvertisedRoutes(t *testing.T) {
+	path := &route.Path{Type: route.BGPPathType}
+	filters := []models.RouteFilter{{Prefix: "0.0.0.0/0", Matcher: "orlonger", Action: "accept"}}
+	received := prependMaxPrefixLengthFilter(buildFilterChain("import", filters), "received", 24)
+	advertised := buildExportFilterChain(filters, true, 24, nil)
+
+	for _, test := range []struct {
+		prefix string
+		reject bool
+	}{
+		{prefix: "1.1.1.0/24", reject: false},
+		{prefix: "1.1.1.0/25", reject: true},
+	} {
+		prefix, err := bnet.PrefixFromString(test.prefix)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for kind, chain := range map[string]filter.Chain{"received": received, "advertised": advertised} {
+			if _, rejected := chain.Process(prefix, path); rejected != test.reject {
+				t.Errorf("%s %s rejected = %v, want %v", kind, test.prefix, rejected, test.reject)
+			}
+		}
+	}
+}
+
+func TestMaxPrefixLengthChangeRequiresDurablePeerReplacement(t *testing.T) {
+	registry := vrf.NewVRFRegistry()
+	defVRF := registry.CreateVRFIfNotExists(vrf.DefaultVRFName, 0)
+	cfg := &models.AppConfig{
+		Server: models.ServerConfig{BGPASN: 64512},
+		Peers: []models.Peer{{
+			Name: "peer", Enabled: true, BGPEnabled: true,
+			BGPPeerIP: "10.0.0.2", BGPPeerPort: 179, BGPPeerASN: 64513,
+		}},
+	}
+
+	before, err := desiredPeers(cfg, defVRF, 1, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.Peers[0].BGPMaxReceivedPrefixLength = 24
+	cfg.Peers[0].BGPMaxAdvertisedPrefixLength = 24
+	after, err := desiredPeers(cfg, defVRF, 1, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for ip, beforeCfg := range before {
+		afterCfg := after[ip]
+		if !peerNeedsReplacement(&beforeCfg, &afterCfg) {
+			t.Fatal("max-prefix-length change did not require durable peer replacement")
+		}
 	}
 }
 
