@@ -855,7 +855,7 @@ var templates = template.Must(template.New("").Funcs(template.FuncMap{
 </dialog>
 {{end}}
 
-{{define "bgp-stats"}}
+{{define "bgp-tab"}}
 <div id="bgp-stats">
     <div class="header-row">
         <h2>BGP Statistics</h2>
@@ -863,6 +863,13 @@ var templates = template.Must(template.New("").Funcs(template.FuncMap{
 
     {{template "bgp-custom-peers" .CustomPeers}}
 
+    <div id="bgp-live-stats" hx-get="bgp/live-stats" hx-trigger="every 2s" hx-swap="innerHTML">
+        {{template "bgp-live-stats" .BGPStats}}
+    </div>
+</div>
+{{end}}
+
+{{define "bgp-live-stats"}}
     {{if not .Running}}
     <article class="toast toast-error">
         BGP Service is currently disabled or not started. Enable it in the Server Configuration.
@@ -971,6 +978,5 @@ var templates = template.Must(template.New("").Funcs(template.FuncMap{
     {{end}}
     {{end}}
     {{end}}
-</div>
 {{end}}
 `))

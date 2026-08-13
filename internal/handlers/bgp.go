@@ -23,7 +23,16 @@ func (h *handler) GetBGPStatsTab(w http.ResponseWriter, r *http.Request) {
 	h.store.Read(func(cfg *models.AppConfig) {
 		data.CustomPeers.Peers = cfg.BGPPeers
 	})
-	if err := templates.ExecuteTemplate(w, "bgp-stats", data); err != nil {
+	if err := templates.ExecuteTemplate(w, "bgp-tab", data); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+	}
+}
+
+// GetBGPLiveStats handles GET /bgp/live-stats — the fragment htmx polls every
+// few seconds so session state and route counts update without a page reload.
+func (h *handler) GetBGPLiveStats(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	if err := templates.ExecuteTemplate(w, "bgp-live-stats", bgp.GetBGPStats()); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 	}
 }

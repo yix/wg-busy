@@ -119,6 +119,7 @@ func NewRouter(store *config.Store, webFS fs.FS, stats *wgstats.Collector, zt *z
 
 	// BGP stats fragment.
 	mux.HandleFunc("GET /bgp/stats", h.GetBGPStatsTab)
+	mux.HandleFunc("GET /bgp/live-stats", h.GetBGPLiveStats)
 
 	// Custom (non-WireGuard) BGP peer fragment endpoints.
 	mux.HandleFunc("GET /bgp/peers/new", h.GetBGPPeerForm)
