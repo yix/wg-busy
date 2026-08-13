@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -20,13 +21,32 @@ func applyError(err error) (*config.ApplyError, bool) {
 	return result, ok
 }
 
-func renderApplyWarning(w http.ResponseWriter, err error) bool {
+func applyWarning(err error) (toastData, bool) {
 	if _, ok := applyError(err); !ok {
-		return false
+		return toastData{}, false
 	}
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	_ = templates.ExecuteTemplate(w, "toast-error", err.Error())
-	return true
+	return toastData{Kind: "error", Message: err.Error()}, true
+}
+
+type toastData struct {
+	Kind    string
+	Message string
+}
+
+type pageResponse struct {
+	Template string
+	Data     any
+	Toast    *toastData `json:",omitempty"`
+}
+
+func writePageJSON(w http.ResponseWriter, status int, templateName string, data any, toast *toastData) {
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(pageResponse{Template: templateName, Data: data, Toast: toast})
+}
+
+func writePageError(w http.ResponseWriter, status int, err error) {
+	writePageJSON(w, status, "empty", struct{ Error string }{Error: err.Error()}, nil)
 }
 
 type handler struct {
@@ -65,10 +85,18 @@ func (s *statusRecorder) WriteHeader(code int) {
 }
 
 func (s *statusRecorder) Write(b []byte) (int, error) {
-	// ponytail: only http.Error bodies are text/plain; HTML error responses carry
-	// their detail via logRejected instead, so we don't log whole rendered forms.
-	if s.status >= 400 && s.detail == "" && strings.HasPrefix(s.Header().Get("Content-Type"), "text/plain") {
-		s.detail = strings.TrimSpace(string(b))
+	if s.status >= 400 && s.detail == "" {
+		contentType := s.Header().Get("Content-Type")
+		if strings.HasPrefix(contentType, "text/plain") {
+			s.detail = strings.TrimSpace(string(b))
+		} else if strings.HasPrefix(contentType, "application/json") {
+			var response struct {
+				Data struct{ Error string }
+			}
+			if json.Unmarshal(b, &response) == nil {
+				s.detail = response.Data.Error
+			}
+		}
 	}
 	return s.ResponseWriter.Write(b)
 }
@@ -98,8 +126,7 @@ func NewRouter(store *config.Store, webFS fs.FS, stats *wgstats.Collector, zt *z
 	// Static files (index.html).
 	mux.Handle("GET /", http.FileServerFS(webFS))
 	mux.HandleFunc("GET /version", func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-		_, _ = fmt.Fprint(w, version)
+		writePageJSON(w, http.StatusOK, "version", struct{ Version string }{Version: version}, nil)
 	})
 
 	// Stats bar fragment (includes OOB peer stats).

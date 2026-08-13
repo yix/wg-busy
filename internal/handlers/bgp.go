@@ -13,28 +13,23 @@ import (
 // bgpTabData is the template data for the BGP tab: live session stats plus the
 // configured standalone (non-WireGuard) BGP peers.
 type bgpTabData struct {
-	*models.BGPStats
+	BGPStats    *models.BGPStats
 	CustomPeers bgpCustomPeersData
 }
 
-// GetBGPStatsTab renders the HTML partial for the BGP statistics.
+// GetBGPStatsTab returns the BGP statistics data.
 func (h *handler) GetBGPStatsTab(w http.ResponseWriter, r *http.Request) {
 	data := bgpTabData{BGPStats: bgp.GetBGPStats()}
 	h.store.Read(func(cfg *models.AppConfig) {
 		data.CustomPeers.Peers = cfg.BGPPeers
 	})
-	if err := templates.ExecuteTemplate(w, "bgp-tab", data); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-	}
+	writePageJSON(w, http.StatusOK, "bgp-tab", data, nil)
 }
 
 // GetBGPLiveStats handles GET /bgp/live-stats — the fragment htmx polls every
 // few seconds so session state and route counts update without a page reload.
 func (h *handler) GetBGPLiveStats(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	if err := templates.ExecuteTemplate(w, "bgp-live-stats", bgp.GetBGPStats()); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-	}
+	writePageJSON(w, http.StatusOK, "bgp-live-stats", bgp.GetBGPStats(), nil)
 }
 
 // bgpPeerFormData is the template data for the custom BGP peer create/edit form.
@@ -62,27 +57,24 @@ func (h *handler) GetBGPPeerForm(w http.ResponseWriter, r *http.Request) {
 			}
 		})
 		if data.Peer.ID == "" {
-			http.Error(w, "BGP peer not found", http.StatusNotFound)
+			writePageError(w, http.StatusNotFound, fmt.Errorf("BGP peer not found"))
 			return
 		}
 	}
 
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	if err := templates.ExecuteTemplate(w, "bgp-peer-form", data); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-	}
+	writePageJSON(w, http.StatusOK, "bgp-peer-form", data, nil)
 }
 
 // CreateBGPPeer handles POST /bgp/peers.
 func (h *handler) CreateBGPPeer(w http.ResponseWriter, r *http.Request) {
 	if err := r.ParseForm(); err != nil {
-		http.Error(w, "Bad request", http.StatusBadRequest)
+		writePageError(w, http.StatusBadRequest, fmt.Errorf("bad request"))
 		return
 	}
 
 	id, err := newPeerID()
 	if err != nil {
-		http.Error(w, fmt.Sprintf("ID generation failed: %v", err), http.StatusInternalServerError)
+		writePageError(w, http.StatusInternalServerError, fmt.Errorf("ID generation failed: %w", err))
 		return
 	}
 
@@ -116,22 +108,22 @@ func (h *handler) CreateBGPPeer(w http.ResponseWriter, r *http.Request) {
 
 	if writeErr != nil {
 		logRejected(r, writeErr)
-		if renderApplyWarning(w, writeErr) {
-			h.listBGPPeersOOB(w, r)
+		if warning, ok := applyWarning(writeErr); ok {
+			h.listBGPPeersOOB(w, r, &warning)
 			return
 		}
 		h.renderBGPPeerFormError(w, bgpPeerFormData{IsNew: true, Peer: peer}, writeErr)
 		return
 	}
 
-	h.listBGPPeersOOB(w, r)
+	h.listBGPPeersOOB(w, r, nil)
 }
 
 // UpdateBGPPeer handles PUT /bgp/peers/{id}.
 func (h *handler) UpdateBGPPeer(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	if err := r.ParseForm(); err != nil {
-		http.Error(w, "Bad request", http.StatusBadRequest)
+		writePageError(w, http.StatusBadRequest, fmt.Errorf("bad request"))
 		return
 	}
 
@@ -169,19 +161,19 @@ func (h *handler) UpdateBGPPeer(w http.ResponseWriter, r *http.Request) {
 
 	if writeErr != nil {
 		logRejected(r, writeErr)
-		if renderApplyWarning(w, writeErr) {
-			h.listBGPPeersOOB(w, r)
+		if warning, ok := applyWarning(writeErr); ok {
+			h.listBGPPeersOOB(w, r, &warning)
 			return
 		}
 		if _, ok := writeErr.(models.ValidationErrors); !ok {
-			http.Error(w, writeErr.Error(), http.StatusInternalServerError)
+			writePageError(w, http.StatusInternalServerError, writeErr)
 			return
 		}
 		h.renderBGPPeerFormError(w, bgpPeerFormData{Peer: submitted}, writeErr)
 		return
 	}
 
-	h.listBGPPeersOOB(w, r)
+	h.listBGPPeersOOB(w, r, nil)
 }
 
 // DeleteBGPPeer handles DELETE /bgp/peers/{id}.
@@ -203,14 +195,19 @@ func (h *handler) DeleteBGPPeer(w http.ResponseWriter, r *http.Request) {
 		return nil
 	})
 
+	var warning *toastData
 	if err != nil {
-		if !renderApplyWarning(w, err) {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+		if value, ok := applyWarning(err); ok {
+			warning = &value
+		} else {
+			writePageError(w, http.StatusInternalServerError, err)
 			return
 		}
 	}
 
-	h.GetBGPStatsTab(w, r)
+	data := bgpTabData{BGPStats: bgp.GetBGPStats()}
+	h.store.Read(func(cfg *models.AppConfig) { data.CustomPeers.Peers = cfg.BGPPeers })
+	writePageJSON(w, http.StatusOK, "bgp-tab", data, warning)
 }
 
 // renderBGPPeerFormError re-renders the form with the rejected input still in it.
@@ -220,20 +217,15 @@ func (h *handler) renderBGPPeerFormError(w http.ResponseWriter, data bgpPeerForm
 	} else {
 		data.Error = writeErr.Error()
 	}
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.WriteHeader(http.StatusUnprocessableEntity)
-	_ = templates.ExecuteTemplate(w, "bgp-peer-form", data)
+	writePageJSON(w, http.StatusUnprocessableEntity, "bgp-peer-form", data, nil)
 }
 
-func (h *handler) listBGPPeersOOB(w http.ResponseWriter, r *http.Request) {
+func (h *handler) listBGPPeersOOB(w http.ResponseWriter, r *http.Request, warning *toastData) {
 	var peers []models.BGPPeer
 	h.store.Read(func(cfg *models.AppConfig) {
 		peers = cfg.BGPPeers
 	})
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	if err := templates.ExecuteTemplate(w, "bgp-custom-peers", bgpCustomPeersData{Peers: peers, OOB: true}); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-	}
+	writePageJSON(w, http.StatusOK, "bgp-custom-peers", bgpCustomPeersData{Peers: peers, OOB: true}, warning)
 }
 
 // bgpCustomPeersData is the template data for the custom BGP peers list section.

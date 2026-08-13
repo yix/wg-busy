@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -16,23 +17,20 @@ type serverFormData struct {
 	ValidationErrors models.ValidationErrors
 }
 
-// GetServerConfig returns the server settings form HTML fragment.
+// GetServerConfig returns the server settings data.
 func (h *handler) GetServerConfig(w http.ResponseWriter, r *http.Request) {
 	var data serverFormData
 	h.store.Read(func(cfg *models.AppConfig) {
 		data.Server = cfg.Server
 	})
 
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	if err := templates.ExecuteTemplate(w, "server-config", data); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-	}
+	writePageJSON(w, http.StatusOK, "server-config", data, nil)
 }
 
 // UpdateServerConfig handles PUT /server.
 func (h *handler) UpdateServerConfig(w http.ResponseWriter, r *http.Request) {
 	if err := r.ParseForm(); err != nil {
-		http.Error(w, "Bad request", http.StatusBadRequest)
+		writePageError(w, http.StatusBadRequest, fmt.Errorf("bad request"))
 		return
 	}
 
@@ -81,21 +79,21 @@ func (h *handler) UpdateServerConfig(w http.ResponseWriter, r *http.Request) {
 
 	if writeErr != nil {
 		logRejected(r, writeErr)
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		if ve, ok := writeErr.(models.ValidationErrors); ok {
 			data.ValidationErrors = ve
-			w.WriteHeader(http.StatusUnprocessableEntity)
+			writePageJSON(w, http.StatusUnprocessableEntity, "server-config", data, nil)
+			return
 		} else if _, ok := applyError(writeErr); ok {
 			data.Error = writeErr.Error()
 		} else {
 			data.Error = writeErr.Error()
-			w.WriteHeader(http.StatusInternalServerError)
+			writePageJSON(w, http.StatusInternalServerError, "server-config", data, nil)
+			return
 		}
-		_ = templates.ExecuteTemplate(w, "server-config", data)
+		writePageJSON(w, http.StatusOK, "server-config", data, nil)
 		return
 	}
 
 	data.Success = "Configuration saved successfully."
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	_ = templates.ExecuteTemplate(w, "server-config", data)
+	writePageJSON(w, http.StatusOK, "server-config", data, nil)
 }

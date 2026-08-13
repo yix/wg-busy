@@ -7,6 +7,7 @@
     <title>WG Busy - WireGuard Manager</title>
     <link rel="stylesheet" href="index.css">
     <script src="https://unpkg.com/htmx.org@2.0.4"></script>
+    <script src="https://unpkg.com/handlebars@4.7.8/dist/handlebars.min.js"></script>
 </head>
 
 <body>
@@ -14,7 +15,7 @@
         <hgroup class="flex-row">
             <div>
                 <h1>WG Busy</h1>
-                <p>WireGuard Server Manager <span class="app-version">(<span hx-get="version" hx-trigger="load" hx-swap="innerHTML">dev</span>)</span></p>
+                <p>WireGuard Server Manager <span class="app-version">(<span hx-get="version" hx-trigger="templates-ready from:body" hx-swap="innerHTML">dev</span>)</span></p>
             </div>
             <button class="btn btn-outline secondary" onclick="toggleTheme()" id="theme-toggle" aria-label="Toggle Theme" title="Toggle Theme">
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -31,7 +32,7 @@
             </button>
         </hgroup>
 
-        <div id="stats-bar" class="stats-bar" hx-get="stats" hx-trigger="load, every 2s" hx-swap="innerHTML">
+        <div id="stats-bar" class="stats-bar" hx-get="stats" hx-trigger="templates-ready from:body, every 2s" hx-swap="innerHTML">
         </div>
 
         <div class="tabs" role="tablist">
@@ -52,7 +53,7 @@
             </button>
         </div>
 
-        <div id="tab-content" hx-get="peers" hx-trigger="load" hx-swap="innerHTML">
+        <div id="tab-content" hx-get="peers" hx-trigger="templates-ready from:body" hx-swap="innerHTML">
         </div>
 
         <div id="modal-container"></div>
@@ -87,12 +88,30 @@
             btn.classList.add('active');
         }
 
-        // htmx discards non-2xx responses by default, which silently hid every
-        // validation error. If the server rendered HTML for a failed request it is a
-        // form with the errors in it, so swap it in; plain-text errors become a toast.
+        var renderPageResponse;
+
+        // Every page endpoint returns {Template, Data, Toast}. HTMX owns the
+        // request/swap lifecycle; Handlebars turns that JSON envelope into the
+        // fragment HTMX swaps, including out-of-band peer and toast updates.
         document.body.addEventListener('htmx:beforeSwap', function (evt) {
             var xhr = evt.detail.xhr;
-            if (xhr.status >= 400 && (xhr.getResponseHeader('Content-Type') || '').indexOf('text/html') === 0) {
+            var contentType = xhr.getResponseHeader('Content-Type') || '';
+            if (contentType.indexOf('application/json') === 0) {
+                try {
+                    var payload = JSON.parse(xhr.responseText);
+                    if (payload.Template === 'empty' && xhr.status >= 400) {
+                        showToast(payload.Data && payload.Data.Error ? payload.Data.Error : 'Request failed');
+                        evt.detail.shouldSwap = false;
+                        evt.detail.isError = false;
+                        return;
+                    }
+                    evt.detail.serverResponse = renderPageResponse(payload);
+                } catch (err) {
+                    showToast('Could not render the server response: ' + err.message);
+                    evt.detail.shouldSwap = false;
+                    evt.detail.isError = false;
+                    return;
+                }
                 evt.detail.shouldSwap = true;
                 evt.detail.isError = false;
             }
@@ -159,6 +178,11 @@
                     }
                 });
             }
+
+            var toastContainer = document.getElementById('toast-container');
+            if (toastContainer.children.length && toastContainer.showPopover && !toastContainer.matches(':popover-open')) {
+                toastContainer.showPopover();
+            }
         });
 
         function closeModal() {
@@ -213,23 +237,50 @@
             var list = document.getElementById(containerId);
             if (!list) return;
 
-            var div = document.createElement('div');
-            div.className = 'route-filter-row';
-            div.style.cssText = 'display:flex; gap:0.5rem; margin-bottom:0.5rem;';
-            div.innerHTML = `
-                <input type="text" name="${namePrefix}Prefix[]" value="" placeholder="Prefix (e.g. 10.1.0.0/16)" style="flex:1">
-                <select name="${namePrefix}Matcher[]" style="width:auto">
-                    <option value="exact">Exact</option>
-                    <option value="orlonger">Or Longer</option>
-                </select>
-                <select name="${namePrefix}Action[]" style="width:auto">
-                    <option value="accept">Accept</option>
-                    <option value="reject">Reject</option>
-                </select>
-                <button type="button" class="btn btn-outline-danger" style="width:auto" onclick="this.closest('.route-filter-row').remove()">X</button>
-            `;
-            list.appendChild(div);
+            var rowTemplate = Handlebars.compile(document.getElementById('route-filter-row-template').textContent);
+            list.insertAdjacentHTML('beforeend', rowTemplate({ NamePrefix: namePrefix }));
         }
+
+        function registerHandlebars() {
+            Handlebars.registerHelper('eq', function (a, b) { return a === b; });
+            Handlebars.registerHelper('ne', function (a, b) { return a !== b; });
+            Handlebars.registerHelper('gt', function (a, b) { return a > b; });
+            Handlebars.registerHelper('and', function () {
+                return Array.prototype.slice.call(arguments, 0, -1).every(Boolean);
+            });
+            Handlebars.registerHelper('or', function () {
+                return Array.prototype.slice.call(arguments, 0, -1).some(Boolean);
+            });
+            Handlebars.registerHelper('not', function (value) { return !value; });
+            Handlebars.registerHelper('len', function (value) { return value ? value.length : 0; });
+            Handlebars.registerHelper('hasField', function (errors, field) {
+                return Array.isArray(errors) && errors.some(function (item) { return item.Field === field; });
+            });
+            Handlebars.registerHelper('formatTime', function (value) {
+                if (!value || value.indexOf('0001-01-01') === 0) return '';
+                return value.slice(0, 10);
+            });
+
+            document.querySelectorAll('#handlebars-templates script[id$="-template"]').forEach(function (node) {
+                Handlebars.registerPartial(node.id.slice(0, -9), node.textContent);
+            });
+            renderPageResponse = Handlebars.compile(document.getElementById('page-template').textContent);
+        }
+
+        fetch('templates.html').then(function (response) {
+            if (!response.ok) throw new Error('HTTP ' + response.status);
+            return response.text();
+        }).then(function (markup) {
+            var host = document.createElement('div');
+            host.id = 'handlebars-templates';
+            host.hidden = true;
+            host.innerHTML = markup;
+            document.body.appendChild(host);
+            registerHandlebars();
+            setTimeout(function () { htmx.trigger(document.body, 'templates-ready'); });
+        }).catch(function (err) {
+            showToast('Could not load UI templates: ' + err.message);
+        });
 
     </script>
 </body>

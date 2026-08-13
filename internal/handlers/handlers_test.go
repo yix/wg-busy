@@ -1,8 +1,10 @@
 package handlers
 
 import (
+	"encoding/json"
 	"errors"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 	"testing/fstest"
@@ -14,19 +16,15 @@ import (
 )
 
 func TestRenderApplyWarningKeepsPersistedMutationOnSuccessPath(t *testing.T) {
-	recorder := httptest.NewRecorder()
 	err := &config.ApplyError{Err: errors.New("wg syncconf failed")}
-	if !renderApplyWarning(recorder, err) {
+	toast, ok := applyWarning(err)
+	if !ok {
 		t.Fatal("ApplyError was not recognized")
 	}
-	if recorder.Code != 200 {
-		t.Fatalf("status = %d, want 200 so htmx renders the persisted state", recorder.Code)
+	if toast.Kind != "error" || !strings.Contains(toast.Message, "configuration saved but live apply failed") {
+		t.Fatalf("warning does not distinguish persistence from apply failure: %#v", toast)
 	}
-	body := recorder.Body.String()
-	if !strings.Contains(body, "configuration saved but live apply failed") || !strings.Contains(body, `hx-swap-oob="beforeend:#toast-container"`) {
-		t.Fatalf("warning response does not distinguish persistence from apply failure: %s", body)
-	}
-	if renderApplyWarning(httptest.NewRecorder(), errors.New("not persisted")) {
+	if _, ok := applyWarning(errors.New("not persisted")); ok {
 		t.Fatal("ordinary error was treated as a persisted mutation")
 	}
 }
@@ -52,14 +50,16 @@ func TestPeerLastSeenUsesNewestTimestampAndExactHoverText(t *testing.T) {
 		wgstats.PeerStats{PublicKey: "peer-key", LatestHandshake: observed},
 	)
 
-	var rendered strings.Builder
-	if err := templates.ExecuteTemplate(&rendered, "peer-stats", row); err != nil {
+	exact := observed.Format(time.RFC3339)
+	if row.LastSeenAt != exact || row.LastSeen == "" {
+		t.Fatalf("last-seen data = %q (%q), want exact timestamp %q", row.LastSeen, row.LastSeenAt, exact)
+	}
+	templateSource, err := os.ReadFile("../../web/templates.html")
+	if err != nil {
 		t.Fatal(err)
 	}
-	exact := observed.Format(time.RFC3339)
-	body := rendered.String()
-	if !strings.Contains(body, `datetime="`+exact+`" title="`+exact+`"`) || !strings.Contains(body, "last seen") {
-		t.Fatalf("last-seen timestamp missing from peer row: %s", body)
+	if !strings.Contains(string(templateSource), `datetime="{{LastSeenAt}}" title="{{LastSeenAt}}"`) {
+		t.Fatal("peer-stats Handlebars template does not expose the exact timestamp")
 	}
 }
 
@@ -68,38 +68,43 @@ func TestVersionEndpointReturnsBuildVersion(t *testing.T) {
 	recorder := httptest.NewRecorder()
 	router.ServeHTTP(recorder, httptest.NewRequest("GET", "/version", nil))
 
-	if got := recorder.Body.String(); got != "v0.0.1" {
-		t.Fatalf("version response = %q, want v0.0.1", got)
+	var response struct {
+		Template string
+		Data     struct{ Version string }
+	}
+	if err := json.NewDecoder(recorder.Body).Decode(&response); err != nil {
+		t.Fatal(err)
+	}
+	if response.Template != "version" || response.Data.Version != "v0.0.1" {
+		t.Fatalf("version response = %#v", response)
 	}
 }
 
 func TestCustomBGPPeerFormIncludesRedistributeConnectedSetting(t *testing.T) {
-	var rendered strings.Builder
 	data := bgpPeerFormData{Peer: models.BGPPeer{
 		RedistributeConnected:     true,
 		MaxReceivedPrefixLength:   24,
 		MaxAdvertisedPrefixLength: 25,
 	}}
-	if err := templates.ExecuteTemplate(&rendered, "bgp-peer-form", data); err != nil {
+	encoded, err := json.Marshal(data)
+	if err != nil {
 		t.Fatal(err)
 	}
-
-	body := rendered.String()
-	if !strings.Contains(body, `name="bgpRedistributeConnected" checked`) ||
-		!strings.Contains(body, `name="bgpMaxReceivedPrefixLength" value="24"`) ||
-		!strings.Contains(body, `name="bgpMaxAdvertisedPrefixLength" value="25"`) {
-		t.Fatalf("custom BGP peer form is missing BGP policy settings: %s", body)
+	for _, value := range []string{`"RedistributeConnected":true`, `"MaxReceivedPrefixLength":24`, `"MaxAdvertisedPrefixLength":25`} {
+		if !strings.Contains(string(encoded), value) {
+			t.Fatalf("custom BGP peer JSON is missing %s: %s", value, encoded)
+		}
 	}
 
-	rendered.Reset()
-	wgData := peerFormData{Peer: models.Peer{BGPMaxReceivedPrefixLength: 26, BGPMaxAdvertisedPrefixLength: 27}}
-	if err := templates.ExecuteTemplate(&rendered, "peer-form", wgData); err != nil {
+	templateSource, err := os.ReadFile("../../web/templates.html")
+	if err != nil {
 		t.Fatal(err)
 	}
-	body = rendered.String()
-	if !strings.Contains(body, `name="bgpMaxReceivedPrefixLength" value="26"`) ||
-		!strings.Contains(body, `name="bgpMaxAdvertisedPrefixLength" value="27"`) {
-		t.Fatalf("WireGuard BGP peer form is missing max-prefix-length settings: %s", body)
+	body := string(templateSource)
+	for _, name := range []string{"bgpRedistributeConnected", "bgpMaxReceivedPrefixLength", "bgpMaxAdvertisedPrefixLength"} {
+		if strings.Count(body, `name="`+name+`"`) < 2 {
+			t.Fatalf("both BGP peer forms must contain %s", name)
+		}
 	}
 }
 

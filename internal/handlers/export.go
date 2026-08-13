@@ -82,15 +82,16 @@ func (h *handler) DownloadServerConfig(w http.ResponseWriter, r *http.Request) {
 func (h *handler) ApplyConfig(w http.ResponseWriter, r *http.Request) {
 	// wg0.conf is already on disk (written on every save).
 	// Just restart the interface.
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	if err := wireguard.RestartWGConfig(h.store.WGConfigPath()); err != nil {
 		msg := fmt.Sprintf("Failed to apply config: %v", err)
-		_ = templates.ExecuteTemplate(w, "toast-error", msg)
+		toast := toastData{Kind: "error", Message: msg}
+		writePageJSON(w, http.StatusOK, "empty", struct{}{}, &toast)
 		return
 	}
 	h.store.MarkWireGuardRestarted()
 	if err := errors.Join(h.store.ReapplyRouting(), h.store.ReapplyBGP()); err != nil {
-		_ = templates.ExecuteTemplate(w, "toast-error", "WireGuard restarted, but dependent services did not fully apply: "+err.Error())
+		toast := toastData{Kind: "error", Message: "WireGuard restarted, but dependent services did not fully apply: " + err.Error()}
+		writePageJSON(w, http.StatusOK, "empty", struct{}{}, &toast)
 		return
 	}
 
@@ -99,5 +100,6 @@ func (h *handler) ApplyConfig(w http.ResponseWriter, r *http.Request) {
 		h.stats.SetStartedAt(time.Now())
 	}
 
-	_ = templates.ExecuteTemplate(w, "toast-success", "WireGuard configuration applied successfully.")
+	toast := toastData{Kind: "success", Message: "WireGuard configuration applied successfully."}
+	writePageJSON(w, http.StatusOK, "empty", struct{}{}, &toast)
 }

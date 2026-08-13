@@ -101,13 +101,10 @@ func (h *handler) buildPeerRow(peer models.Peer, exitNodeName string, stats wgst
 	return row
 }
 
-// ListPeers returns the peers list HTML fragment.
+// ListPeers returns the peers list data.
 func (h *handler) ListPeers(w http.ResponseWriter, r *http.Request) {
 	data := h.buildPeersListData()
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	if err := templates.ExecuteTemplate(w, "peers-list", data); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-	}
+	writePageJSON(w, http.StatusOK, "peers-list", data, nil)
 }
 
 // GetPeerForm returns the peer create or edit form dialog.
@@ -129,27 +126,24 @@ func (h *handler) GetPeerForm(w http.ResponseWriter, r *http.Request) {
 	})
 
 	if !isNew && data.Peer.ID == "" {
-		http.Error(w, "Peer not found", http.StatusNotFound)
+		writePageError(w, http.StatusNotFound, fmt.Errorf("peer not found"))
 		return
 	}
 
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	if err := templates.ExecuteTemplate(w, "peer-form", data); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-	}
+	writePageJSON(w, http.StatusOK, "peer-form", data, nil)
 }
 
 // CreatePeer handles POST /peers.
 func (h *handler) CreatePeer(w http.ResponseWriter, r *http.Request) {
 	if err := r.ParseForm(); err != nil {
-		http.Error(w, "Bad request", http.StatusBadRequest)
+		writePageError(w, http.StatusBadRequest, fmt.Errorf("bad request"))
 		return
 	}
 
 	// Generate keys.
 	privKey, pubKey, err := wireguard.GenerateKeyPair()
 	if err != nil {
-		http.Error(w, fmt.Sprintf("Key generation failed: %v", err), http.StatusInternalServerError)
+		writePageError(w, http.StatusInternalServerError, fmt.Errorf("key generation failed: %w", err))
 		return
 	}
 
@@ -157,7 +151,7 @@ func (h *handler) CreatePeer(w http.ResponseWriter, r *http.Request) {
 	if r.FormValue("presharedKey") == "on" {
 		psk, err = wireguard.GeneratePresharedKey()
 		if err != nil {
-			http.Error(w, fmt.Sprintf("PSK generation failed: %v", err), http.StatusInternalServerError)
+			writePageError(w, http.StatusInternalServerError, fmt.Errorf("PSK generation failed: %w", err))
 			return
 		}
 	}
@@ -178,7 +172,7 @@ func (h *handler) CreatePeer(w http.ResponseWriter, r *http.Request) {
 
 	id, err := newPeerID()
 	if err != nil {
-		http.Error(w, fmt.Sprintf("ID generation failed: %v", err), http.StatusInternalServerError)
+		writePageError(w, http.StatusInternalServerError, fmt.Errorf("ID generation failed: %w", err))
 		return
 	}
 
@@ -243,8 +237,8 @@ func (h *handler) CreatePeer(w http.ResponseWriter, r *http.Request) {
 
 	if writeErr != nil {
 		logRejected(r, writeErr)
-		if renderApplyWarning(w, writeErr) {
-			h.listPeersOOB(w, r)
+		if warning, ok := applyWarning(writeErr); ok {
+			h.listPeersOOB(w, r, &warning)
 			return
 		}
 		h.renderPeerFormError(w, peerFormData{IsNew: true, Peer: peer}, writeErr)
@@ -254,7 +248,7 @@ func (h *handler) CreatePeer(w http.ResponseWriter, r *http.Request) {
 	// Success: return full peers list with OOB swap to close modal.
 	// We return an empty string (200 OK) for the form target (#modal-container), which clears the modal.
 	// The OOB swap updates the peers list in the background.
-	h.listPeersOOB(w, r)
+	h.listPeersOOB(w, r, nil)
 }
 
 func assignNewPeerRoutingTables(peer *models.Peer, existing []models.Peer) {
@@ -271,7 +265,7 @@ func assignNewPeerRoutingTables(peer *models.Peer, existing []models.Peer) {
 func (h *handler) UpdatePeer(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	if err := r.ParseForm(); err != nil {
-		http.Error(w, "Bad request", http.StatusBadRequest)
+		writePageError(w, http.StatusBadRequest, fmt.Errorf("bad request"))
 		return
 	}
 
@@ -359,19 +353,19 @@ func (h *handler) UpdatePeer(w http.ResponseWriter, r *http.Request) {
 
 	if writeErr != nil {
 		logRejected(r, writeErr)
-		if renderApplyWarning(w, writeErr) {
-			h.listPeersOOB(w, r)
+		if warning, ok := applyWarning(writeErr); ok {
+			h.listPeersOOB(w, r, &warning)
 			return
 		}
 		if _, ok := writeErr.(models.ValidationErrors); !ok {
-			http.Error(w, writeErr.Error(), http.StatusInternalServerError)
+			writePageError(w, http.StatusInternalServerError, writeErr)
 			return
 		}
 		h.renderPeerFormError(w, peerFormData{Peer: submitted}, writeErr)
 		return
 	}
 
-	h.listPeersOOB(w, r)
+	h.listPeersOOB(w, r, nil)
 }
 
 // DeletePeer handles DELETE /peers/{id}.
@@ -399,15 +393,19 @@ func (h *handler) DeletePeer(w http.ResponseWriter, r *http.Request) {
 		return nil
 	})
 
+	var warning *toastData
 	if err != nil {
-		if !renderApplyWarning(w, err) {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+		if value, ok := applyWarning(err); ok {
+			warning = &value
+		} else {
+			writePageError(w, http.StatusInternalServerError, err)
 			return
 		}
 	}
 
 	// Return full peers list so the UI updates.
-	h.ListPeers(w, r)
+	data := h.buildPeersListData()
+	writePageJSON(w, http.StatusOK, "peers-list", data, warning)
 }
 
 // TogglePeer handles PUT /peers/{id}/toggle.
@@ -433,9 +431,12 @@ func (h *handler) TogglePeer(w http.ResponseWriter, r *http.Request) {
 		return nil
 	})
 
+	var warning *toastData
 	if err != nil {
-		if !renderApplyWarning(w, err) {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+		if value, ok := applyWarning(err); ok {
+			warning = &value
+		} else {
+			writePageError(w, http.StatusInternalServerError, err)
 			return
 		}
 	}
@@ -458,10 +459,7 @@ func (h *handler) TogglePeer(w http.ResponseWriter, r *http.Request) {
 	}
 	data := h.buildPeerRow(peer, exitNodeName, stats)
 
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	if err := templates.ExecuteTemplate(w, "peer-row", data); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-	}
+	writePageJSON(w, http.StatusOK, "peer-row", data, warning)
 }
 
 // RegeneratePeerKeys handles POST /api/peers/{id}/regenerate-keys.
@@ -486,15 +484,26 @@ func (h *handler) RegeneratePeerKeys(w http.ResponseWriter, r *http.Request) {
 		return nil
 	})
 
+	var warning *toastData
 	if err != nil {
-		if !renderApplyWarning(w, err) {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+		if value, ok := applyWarning(err); ok {
+			warning = &value
+		} else {
+			writePageError(w, http.StatusInternalServerError, err)
 			return
 		}
 	}
 
 	// Return the edit form with updated data.
-	h.GetPeerForm(w, r)
+	data := peerFormData{}
+	h.store.Read(func(cfg *models.AppConfig) {
+		if p := models.FindPeerByID(cfg.Peers, id); p != nil {
+			data.Peer = *p
+		}
+		data.ExitNodes = models.ExitNodePeers(cfg.Peers)
+		data.Gateways = models.GatewayNets(cfg.Server.Address, h.ztGatewayNets())
+	})
+	writePageJSON(w, http.StatusOK, "peer-form", data, warning)
 }
 
 // renderPeerFormError re-renders the form with the rejected input still in it.
@@ -509,9 +518,7 @@ func (h *handler) renderPeerFormError(w http.ResponseWriter, data peerFormData, 
 		data.ExitNodes = models.ExitNodePeers(cfg.Peers)
 		data.Gateways = models.GatewayNets(cfg.Server.Address, h.ztGatewayNets())
 	})
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.WriteHeader(http.StatusUnprocessableEntity)
-	_ = templates.ExecuteTemplate(w, "peer-form", data)
+	writePageJSON(w, http.StatusUnprocessableEntity, "peer-form", data, nil)
 }
 
 // newPeerID returns a random opaque ID for a new peer.
@@ -536,13 +543,10 @@ func parseRouteList(s string) []string {
 	return out
 }
 
-func (h *handler) listPeersOOB(w http.ResponseWriter, r *http.Request) {
+func (h *handler) listPeersOOB(w http.ResponseWriter, r *http.Request, warning *toastData) {
 	data := h.buildPeersListData()
 	data.OOB = true
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	if err := templates.ExecuteTemplate(w, "peers-list", data); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-	}
+	writePageJSON(w, http.StatusOK, "peers-list", data, warning)
 }
 
 func parsePeerBGPForm(r *http.Request) (bgpEnabled, bgpConnect, bgpRedistributeConnected bool, bgpMaxReceivedPrefixLength, bgpMaxAdvertisedPrefixLength uint16, bgpPeerIP string, bgpPeerPort uint16, bgpPeerASN uint32, bgpRouteFilters, bgpExportFilters []models.RouteFilter) {

@@ -23,8 +23,8 @@ type statsBarData struct {
 	Peers        []peerRowData
 }
 
-// GetCombinedStats returns the stats bar fragment, with an out-of-band swap for
-// each peer row's stats.
+// GetCombinedStats returns the stats bar data, including each peer row's live
+// stats for Handlebars to render as out-of-band swaps.
 func (h *handler) GetCombinedStats(w http.ResponseWriter, r *http.Request) {
 	data := statsBarData{Peers: h.buildPeersListData().Peers}
 
@@ -39,10 +39,7 @@ func (h *handler) GetCombinedStats(w http.ResponseWriter, r *http.Request) {
 		data.SparklineSVG = wgstats.RenderSparklineSVG(h.stats.GetHistory(), 120, 24)
 	}
 
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	if err := templates.ExecuteTemplate(w, "stats-bar", data); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-	}
+	writePageJSON(w, http.StatusOK, "stats-bar", data, nil)
 }
 
 // QRCode handles GET /api/peers/{id}/qr.
@@ -97,7 +94,7 @@ func (h *handler) QRCodeModal(w http.ResponseWriter, r *http.Request) {
 	})
 
 	if peerName == "" {
-		http.Error(w, "Peer not found", http.StatusNotFound)
+		writePageError(w, http.StatusNotFound, fmt.Errorf("peer not found"))
 		return
 	}
 
@@ -106,8 +103,5 @@ func (h *handler) QRCodeModal(w http.ResponseWriter, r *http.Request) {
 		Name string
 	}{ID: id, Name: peerName}
 
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	if err := templates.ExecuteTemplate(w, "qr-modal", data); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-	}
+	writePageJSON(w, http.StatusOK, "qr-modal", data, nil)
 }

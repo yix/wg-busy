@@ -1,0 +1,1040 @@
+<script type="text/x-handlebars-template" id="page-template">
+{{#if Toast}}{{> toast Toast}}{{/if}}
+{{> (lookup . "Template") Data}}
+</script>
+
+<script type="text/x-handlebars-template" id="empty-template"></script>
+
+<script type="text/x-handlebars-template" id="version-template">{{Version}}</script>
+
+<script type="text/x-handlebars-template" id="toast-template">
+<div class="toast toast-{{Kind}}" role="alert" hx-swap-oob="beforeend:#toast-container">{{Message}}</div>
+</script>
+
+<script type="text/x-handlebars-template" id="route-filter-row-template">
+<div class="route-filter-row" style="display:flex; gap:0.5rem; margin-bottom:0.5rem;">
+    <input type="text" name="{{NamePrefix}}Prefix[]" value="" placeholder="Prefix (e.g. 10.1.0.0/16)" style="flex:1">
+    <select name="{{NamePrefix}}Matcher[]" style="width:auto">
+        <option value="exact">Exact</option>
+        <option value="orlonger">Or Longer</option>
+    </select>
+    <select name="{{NamePrefix}}Action[]" style="width:auto">
+        <option value="accept">Accept</option>
+        <option value="reject">Reject</option>
+    </select>
+    <button type="button" class="btn btn-outline-danger" style="width:auto" onclick="this.closest('.route-filter-row').remove()">X</button>
+</div>
+</script>
+
+<script type="text/x-handlebars-template" id="toast-success-template">
+<div class="toast toast-success" role="alert">{{this}}</div>
+</script>
+
+<script type="text/x-handlebars-template" id="toast-error-template">
+<div class="toast toast-error" role="alert" hx-swap-oob="beforeend:#toast-container">{{this}}</div>
+</script>
+
+
+<script type="text/x-handlebars-template" id="error-summary-template">
+{{#if this}}
+<div class="toast toast-error" role="alert">
+    <div>
+        <strong>Could not save &mdash; please fix:</strong>
+        <ul class="error-list">
+            {{#each this}}<li><code>{{Field}}</code> {{Message}}</li>{{/each}}
+        </ul>
+    </div>
+</div>
+{{/if}}
+</script>
+
+
+<script type="text/x-handlebars-template" id="stats-bar-template">
+<div class="stats-bar-inner">
+    <span class="stats-status">
+        {{#if IsUp}}
+        <span class="status-dot status-up"></span> wg0 up {{Uptime}}
+        {{else}}
+        <span class="status-dot status-down"></span> wg0 down
+        {{/if}}
+    </span>
+    <span class="stats-transfer">
+        <span class="stats-rx">&darr; {{CurrentRxPS}} <small class="text-muted">({{TotalRx}})</small></span>
+        <span class="stats-tx">&uarr; {{CurrentTxPS}} <small class="text-muted">({{TotalTx}})</small></span>
+    </span>
+    <span class="stats-sparkline">{{{SparklineSVG}}}</span>
+</div>
+{{#each Peers}}
+<small id="peer-stats-{{Peer.ID}}" hx-swap-oob="true">{{> peer-stats this}}</small>
+{{/each}}
+</script>
+
+<script type="text/x-handlebars-template" id="peers-list-template">
+<div id="peers-list" {{#if OOB}}hx-swap-oob="true"{{/if}}>
+    <div class="header-row">
+        <h2>Peers ({{len Peers}})</h2>
+        <button class="btn btn-primary" hx-get="peers/new" hx-target="#modal-container" hx-swap="innerHTML">+ Add Peer</button>
+    </div>
+    {{#unless Peers}}
+    <p>No peers configured. Add one to get started.</p>
+    {{else}}
+    {{#each Peers}}
+    {{> peer-row this}}
+    {{/each}}
+    {{/unless}}
+</div>
+</script>
+
+<script type="text/x-handlebars-template" id="peer-row-template">
+<div class="peer-row {{#unless Peer.Enabled}}peer-disabled{{/unless}}" id="peer-{{Peer.ID}}">
+    <div class="peer-info">
+        <strong>
+            {{Peer.Name}}
+            {{#if Peer.IsExitNode}}<span class="badge badge-exit">Exit Node</span>{{/if}}
+            {{#if ExitNodeName}}<span class="badge badge-via">via {{ExitNodeName}}</span>{{/if}}
+            {{#if Peer.StrictPolicyRouting}}<span class="badge badge-warn" title="Traffic may only use this peer's own routes">Strict</span>{{/if}}
+        </strong>
+        {{#if Endpoint}}<div style="font-size:0.8em;font-weight:normal;opacity:0.7;margin-top:0.1em">({{Endpoint}})</div>{{/if}}
+        <small id="peer-stats-{{Peer.ID}}">
+           {{> peer-stats this}}
+        </small>
+    </div>
+    <div class="peer-actions">
+        <button class="btn btn-outline secondary qr-btn" title="QR Code"
+                hx-get="peers/{{Peer.ID}}/qr" hx-target="#modal-container" hx-swap="innerHTML">
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M0 0h7v7H0V0zm1 1v5h5V1H1zm1 1h3v3H2V2zm8-2h7v7H10V0zm1 1v5h5V1h-5zm1 1h3v3h-3V2zM0 10h7v6H0v-6zm1 1v4h5v-4H1zm1 1h3v2H2v-2zm8-2h2v2h-2v-2zm3 0h3v2h-3v-2zm-3 3h2v3h-2v-3zm3 0h1v1h-1v-1zm2 0h1v1h-1v-1zm2 0h1v3h-1v-3zm-2 2h1v1h-1v-1z"/></svg>
+        </button>
+        <a href="api/peers/{{Peer.ID}}/config" download role="button" class="btn btn-outline secondary">Download</a>
+        <button class="btn btn-outline" hx-get="peers/{{Peer.ID}}/edit" hx-target="#modal-container" hx-swap="innerHTML">Edit</button>
+        <button class="btn btn-outline secondary"
+                hx-put="peers/{{Peer.ID}}/toggle"
+                hx-target="#peer-{{Peer.ID}}"
+                hx-swap="outerHTML">
+            {{#if Peer.Enabled}}Disable{{else}}Enable{{/if}}
+        </button>
+        <button class="btn btn-outline-danger"
+                hx-delete="peers/{{Peer.ID}}"
+                hx-target="#tab-content"
+                hx-swap="innerHTML"
+                hx-confirm="Delete peer {{Peer.Name}}?">
+            Delete
+        </button>
+    </div>
+</div>
+</script>
+
+<script type="text/x-handlebars-template" id="peer-stats-template">
+    {{Peer.AllowedIPs}}
+    {{#if HasStats}} &middot; <span class="stats-rx">&darr;{{CurrentRxPS}} <small class="text-muted">({{TransferRx}})</small></span> <span class="stats-tx">&uarr;{{CurrentTxPS}} <small class="text-muted">({{TransferTx}})</small></span>{{/if}}
+    {{#unless HasStats}} &middot; Created {{formatTime Peer.CreatedAt}}{{/unless}}
+    &middot; last seen {{#if LastSeenAt}}<time datetime="{{LastSeenAt}}" title="{{LastSeenAt}}">{{LastSeen}}</time>{{else}}never{{/if}}
+    {{#if HasStats}} <span class="peer-sparkline">{{{SparklineSVG}}}</span>{{/if}}
+</script>
+
+<script type="text/x-handlebars-template" id="qr-modal-template">
+<dialog>
+    <article>
+        <header class="flex-row">
+            <p class="mb-0"><strong>QR Code &mdash; {{Name}}</strong></p>
+            <button aria-label="Close" class="btn btn-outline secondary mb-0" style="padding: 0.1rem 0.6rem" onclick="closeModal()">X</button>
+        </header>
+        <div style="text-align:center">
+            <img src="api/peers/{{ID}}/qr" alt="QR Code for {{Name}}" width="256" height="256"
+                 style="image-rendering:pixelated">
+            <p><small>Scan with the WireGuard mobile app to import this peer configuration.</small></p>
+        </div>
+        <footer>
+            <button type="button" class="btn btn-secondary" onclick="closeModal()">Close</button>
+        </footer>
+    </article>
+</dialog>
+</script>
+
+<script type="text/x-handlebars-template" id="peer-form-template">
+<dialog>
+    <article>
+        <header class="flex-row">
+            <p class="mb-0"><strong>{{#if IsNew}}Add Peer{{else}}Edit Peer{{/if}}</strong></p>
+            <button aria-label="Close" class="btn btn-outline secondary mb-0" style="padding: 0.1rem 0.6rem" onclick="closeModal()">X</button>
+        </header>
+        <form {{#if IsNew}}hx-post="peers"{{else}}hx-put="peers/{{Peer.ID}}"{{/if}}
+              hx-target="#modal-container" hx-swap="innerHTML">
+
+            {{#if Error}}<div class="toast toast-error" role="alert">{{Error}}</div>{{/if}}
+            {{> error-summary ValidationErrors}}
+
+            <label>
+                Name *
+                <input type="text" name="name" value="{{Peer.Name}}" required maxlength="64"
+                       placeholder="e.g. Alice Laptop"
+                       {{#if (hasField ValidationErrors "name")}}aria-invalid="true"{{/if}}>
+                {{#each ValidationErrors}}{{#if (eq Field "name")}}<small class="field-error">{{Message}}</small>{{/if}}{{/each}}
+            </label>
+
+            <label>
+                Client IP
+                <input type="text" name="allowedIPs" value="{{Peer.AllowedIPs}}"
+                       placeholder="Auto-assign (leave empty)"
+                       {{#if (hasField ValidationErrors "allowedIPs")}}aria-invalid="true"{{/if}}>
+                <small>Leave empty to auto-assign next available IP from server subnet.</small>
+                {{#each ValidationErrors}}{{#if (eq Field "allowedIPs")}}<small class="field-error">{{Message}}</small>{{/if}}{{/each}}
+            </label>
+
+            <label>
+                Allowed Client IPs
+                <input type="text" name="clientAllowedIPs" value="{{#if Peer.ClientAllowedIPs}}{{Peer.ClientAllowedIPs}}{{else}}0.0.0.0/0, ::/0{{/if}}"
+                       placeholder="0.0.0.0/0, ::/0">
+                <small>Routes the client sends through the tunnel.</small>
+            </label>
+
+            <label>
+                Advertised Routes
+                <textarea name="advertisedRoutes" rows="2"
+                          placeholder="10.1.2.0/24">{{#each Peer.AdvertisedRoutes}}{{this}}
+{{/each}}</textarea>
+                <small>Networks behind this peer to route through the tunnel (one CIDR per line or comma-separated).</small>
+                {{#each ValidationErrors}}{{#if (eq Field "advertisedRoutes")}}<small class="field-error">{{Message}}</small>{{/if}}{{/each}}
+            </label>
+            
+            <label>
+                Policy Routes
+                <textarea name="policyRoutes" rows="2"
+                          placeholder="10.5.5.0/24 via 10.0.0.1">{{#each Peer.PolicyRoutes}}{{this}}
+{{/each}}</textarea>
+                <small>Format: &lt;CIDR&gt; via &lt;Gateway IP&gt;, one per line. Traffic to these subnets from this peer will be routed via the gateway.</small>
+                <small>
+                    The gateway can be a WireGuard peer or a ZeroTier peer &mdash; the route follows whichever interface it is on-link for. Available:
+                    {{#each Gateways}}{{#if @index}}, {{/if}}<code>{{CIDR}}</code> ({{Device}}){{else}}none configured{{/each}}
+                </small>
+                {{#each ValidationErrors}}{{#if (eq Field "policyRoutes")}}<small class="field-error">{{Message}}</small>{{/if}}{{/each}}
+            </label>
+
+            <fieldset>
+                <label>
+                    <input type="checkbox" name="strictPolicyRouting" {{#if Peer.StrictPolicyRouting}}checked{{/if}}>
+                    Strict policy routing
+                </label>
+                <small>
+                    Traffic from this peer may only use the routes above. Anything they do not
+                    match is rejected instead of falling back to the server's main routing table,
+                    so nothing can leak out of the intended path.
+                </small>
+                {{#each ValidationErrors}}{{#if (eq Field "strictPolicyRouting")}}<small class="field-error">{{Message}}</small>{{/if}}{{/each}}
+            </fieldset>
+
+            <label>
+                DNS (override)
+                <input type="text" name="dns" value="{{Peer.DNS}}"
+                       placeholder="Inherit from server">
+            </label>
+
+            <label>
+                Persistent Keepalive (seconds)
+                <input type="number" name="persistentKeepalive"
+                       value="{{#if Peer.PersistentKeepalive}}{{Peer.PersistentKeepalive}}{{else}}25{{/if}}"
+                       min="0" max="65535">
+            </label>
+
+            <label>
+                Endpoint
+                <input type="text" name="endpoint" value="{{Peer.Endpoint}}"
+                       placeholder="Not usually needed for server-side peers">
+            </label>
+
+            <fieldset>
+                <label>
+                    <input type="checkbox" name="presharedKey" {{#if (or Defaults Peer.PresharedKey)}}checked{{/if}}>
+                    {{#if IsNew}}Generate preshared key{{else}}Has preshared key{{/if}}
+                </label>
+                <label>
+                    <input type="checkbox" name="enabled" {{#if (or Defaults Peer.Enabled)}}checked{{/if}}>
+                    Enabled
+                </label>
+            </fieldset>
+
+            <fieldset>
+                <label>
+                    <input type="checkbox" name="isExitNode" {{#if Peer.IsExitNode}}checked{{/if}}
+                           onchange="toggleExitNodeFields(this)">
+                    Exit Node
+                </label>
+            </fieldset>
+
+            <div id="exit-node-config" {{#unless Peer.IsExitNode}}style="display:none"{{/unless}} class="exit-node-field">
+                <fieldset>
+                    <legend>Exit Node Configuration</legend>
+                    <label>
+                        <input type="checkbox" name="exitNodeAllowAll"
+                               {{#if (or Defaults Peer.ExitNodeAllowAll)}}checked{{/if}}
+                               onchange="toggleExitNodeRoutes(this)">
+                        Route all traffic via this node (0.0.0.0/0)
+                    </label>
+
+                    <div id="exit-node-routes-field" {{#if (or Defaults Peer.ExitNodeAllowAll)}}style="display:none"{{/if}}>
+                        <label>
+                            Specific Routes (CIDRs)
+                            <textarea name="exitNodeRoutes" rows="3" 
+                                      placeholder="10.0.0.0/24">{{#each Peer.ExitNodeRoutes}}{{this}}
+{{/each}}</textarea>
+                            <small>One CIDR per line. Leave empty to route nothing (if check disabled).</small>
+                        </label>
+                    </div>
+                </fieldset>
+            </div>
+
+            <div id="route-via-field" {{#if Peer.IsExitNode}}style="display:none"{{/if}}>
+                <label>
+                    Route via (exit node)
+                    <select name="exitNodeID">
+                        <option value="">None</option>
+                        {{#each ExitNodes}}
+                        <option value="{{ID}}" {{#if (eq ID @root.Peer.ExitNodeID)}}selected{{/if}}>{{Name}} ({{AllowedIPs}})</option>
+                        {{/each}}
+                    </select>
+                </label>
+            </div>
+
+            <fieldset>
+                <legend>BGP Overlay Settings</legend>
+                <label>
+                    <input type="checkbox" id="bgpEnabled" name="bgpEnabled" {{#if Peer.BGPEnabled}}checked{{/if}} onchange="toggleBGPSettings(this)">
+                    Enable BGP
+                </label>
+                <div id="bgp-settings-config" {{#unless Peer.BGPEnabled}}style="display:none"{{/unless}}>
+                    <label>
+                        <input type="checkbox" name="bgpConnect" {{#if Peer.BGPConnect}}checked{{/if}} title="Actively initiate connection to the peer"> Connect
+                    </label>
+                    <label>
+                        <input type="checkbox" name="bgpRedistributeConnected" {{#if Peer.BGPRedistributeConnected}}checked{{/if}}>
+                        Redistribute local and connected routes
+                        <small>Advertise this host's active interface addresses and connected networks. Advertised prefix filters still apply.</small>
+                    </label>
+                    <div class="grid">
+                        <label>
+                            Peer BGP IP *
+                            <input type="text" name="bgpPeerIP" value="{{Peer.BGPPeerIP}}" placeholder="10.0.0.123" {{#if (hasField ValidationErrors "bgpPeerIP")}}aria-invalid="true"{{/if}}>
+                            {{#each ValidationErrors}}{{#if (eq Field "bgpPeerIP")}}<small class="field-error">{{Message}}</small>{{/if}}{{/each}}
+                        </label>
+                        <label>
+                            Peer ASN *
+                            <input type="number" name="bgpPeerAsn" value="{{#if Peer.BGPPeerASN}}{{Peer.BGPPeerASN}}{{else}}64512{{/if}}" {{#if (hasField ValidationErrors "bgpPeerAsn")}}aria-invalid="true"{{/if}}>
+                            {{#each ValidationErrors}}{{#if (eq Field "bgpPeerAsn")}}<small class="field-error">{{Message}}</small>{{/if}}{{/each}}
+                        </label>
+                        <label>
+                            Peer Port *
+                            <input type="number" name="bgpPeerPort" value="179" min="179" max="179" readonly {{#if (hasField ValidationErrors "bgpPeerPort")}}aria-invalid="true"{{/if}}>
+                            <small>The embedded BGP engine currently supports peer port 179.</small>
+                            {{#each ValidationErrors}}{{#if (eq Field "bgpPeerPort")}}<small class="field-error">{{Message}}</small>{{/if}}{{/each}}
+                        </label>
+                    </div>
+
+                    <div class="grid">
+                        <label>
+                            Max received prefix length
+                            <input type="number" name="bgpMaxReceivedPrefixLength" value="{{#if Peer.BGPMaxReceivedPrefixLength}}{{Peer.BGPMaxReceivedPrefixLength}}{{/if}}" min="0" max="128" placeholder="Unlimited" {{#if (hasField ValidationErrors "bgpMaxReceivedPrefixLength")}}aria-invalid="true"{{/if}}>
+                            <small>Inclusive. For example, 24 accepts /24 and rejects /25 or longer. Leave blank or use 0 for unlimited.</small>
+                            {{#each ValidationErrors}}{{#if (eq Field "bgpMaxReceivedPrefixLength")}}<small class="field-error">{{Message}}</small>{{/if}}{{/each}}
+                        </label>
+                        <label>
+                            Max advertised prefix length
+                            <input type="number" name="bgpMaxAdvertisedPrefixLength" value="{{#if Peer.BGPMaxAdvertisedPrefixLength}}{{Peer.BGPMaxAdvertisedPrefixLength}}{{/if}}" min="0" max="128" placeholder="Unlimited" {{#if (hasField ValidationErrors "bgpMaxAdvertisedPrefixLength")}}aria-invalid="true"{{/if}}>
+                            <small>Inclusive. Prefixes longer than this value are not advertised. Leave blank or use 0 for unlimited.</small>
+                            {{#each ValidationErrors}}{{#if (eq Field "bgpMaxAdvertisedPrefixLength")}}<small class="field-error">{{Message}}</small>{{/if}}{{/each}}
+                        </label>
+                    </div>
+                    
+                    <div style="margin-top: 1rem;">
+                        <label>Received Prefix Filters</label>
+                        <small>Controls which prefixes received from this peer are accepted. Leave empty to accept everything.</small>
+                        <div id="bgp-route-filters-list">
+                            {{#each Peer.BGPRouteFilters}}
+                            <div class="route-filter-row" style="display:flex; gap:0.5rem; margin-bottom:0.5rem;">
+                                <input type="text" name="filterPrefix[]" value="{{Prefix}}" placeholder="Prefix (e.g. 10.1.0.0/16)" style="flex:1">
+                                <select name="filterMatcher[]" style="width:auto">
+                                    <option value="exact" {{#if (eq Matcher "exact")}}selected{{/if}}>Exact</option>
+                                    <option value="orlonger" {{#if (eq Matcher "orlonger")}}selected{{/if}}>Or Longer</option>
+                                </select>
+                                <select name="filterAction[]" style="width:auto">
+                                    <option value="accept" {{#if (eq Action "accept")}}selected{{/if}}>Accept</option>
+                                    <option value="reject" {{#if (eq Action "reject")}}selected{{/if}}>Reject</option>
+                                </select>
+                                <button type="button" class="btn btn-outline-danger" style="width:auto" onclick="this.closest('.route-filter-row').remove()">X</button>
+                            </div>
+                            {{/each}}
+                        </div>
+                        <button type="button" class="btn btn-outline secondary" style="width:auto; margin-top:0.5rem;" onclick="addRouteFilterRow()">+ Add Filter</button>
+                    </div>
+
+                    <div style="margin-top: 1rem;">
+                        <label>Advertised Prefix Filters</label>
+                        <small>Controls which locally known prefixes are advertised to this peer. Leave empty to advertise everything.</small>
+                        <div id="bgp-export-filters-list">
+                            {{#each Peer.BGPExportFilters}}
+                            <div class="route-filter-row" style="display:flex; gap:0.5rem; margin-bottom:0.5rem;">
+                                <input type="text" name="exportFilterPrefix[]" value="{{Prefix}}" placeholder="Prefix (e.g. 10.1.0.0/16)" style="flex:1">
+                                <select name="exportFilterMatcher[]" style="width:auto">
+                                    <option value="exact" {{#if (eq Matcher "exact")}}selected{{/if}}>Exact</option>
+                                    <option value="orlonger" {{#if (eq Matcher "orlonger")}}selected{{/if}}>Or Longer</option>
+                                </select>
+                                <select name="exportFilterAction[]" style="width:auto">
+                                    <option value="accept" {{#if (eq Action "accept")}}selected{{/if}}>Accept</option>
+                                    <option value="reject" {{#if (eq Action "reject")}}selected{{/if}}>Reject</option>
+                                </select>
+                                <button type="button" class="btn btn-outline-danger" style="width:auto" onclick="this.closest('.route-filter-row').remove()">X</button>
+                            </div>
+                            {{/each}}
+                        </div>
+                        <button type="button" class="btn btn-outline secondary" style="width:auto; margin-top:0.5rem;" onclick="addRouteFilterRow('bgp-export-filters-list', 'exportFilter')">+ Add Filter</button>
+                    </div>
+                </div>
+            </fieldset>
+
+            <footer>
+                <button type="button" class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+                <button type="submit" class="btn btn-primary">{{#if IsNew}}Create Peer{{else}}Save Changes{{/if}}</button>
+            </footer>
+        </form>
+    </article>
+</dialog>
+</script>
+
+<script type="text/x-handlebars-template" id="server-config-template">
+<div id="server-config">
+    <div class="header-row">
+        <h2>Server Configuration</h2>
+        <div class="btn-group">
+            <a href="api/server/config" download role="button" class="btn btn-outline secondary">Download wg0.conf</a>
+            <button class="btn btn-primary" hx-post="api/server/apply" hx-target="#apply-result" hx-swap="innerHTML"
+                    hx-confirm="Apply configuration? This will restart the WireGuard interface.">
+                Apply Config
+            </button>
+        </div>
+    </div>
+
+    <div id="apply-result"></div>
+
+    {{#if Success}}<div class="toast toast-success" role="alert">{{Success}}</div>{{/if}}
+    {{#if Error}}<div class="toast toast-error" role="alert">{{Error}}</div>{{/if}}
+    {{> error-summary ValidationErrors}}
+
+    <form hx-put="server" hx-target="#tab-content" hx-swap="innerHTML">
+
+        <div class="grid">
+            <label>
+                Listen Port *
+                <input type="number" name="listenPort" value="{{Server.ListenPort}}"
+                       required min="1" max="65535"
+                       {{#if (hasField ValidationErrors "listenPort")}}aria-invalid="true"{{/if}}>
+                {{#each ValidationErrors}}{{#if (eq Field "listenPort")}}<small class="field-error">{{Message}}</small>{{/if}}{{/each}}
+            </label>
+            <label>
+                Address (CIDR) *
+                <input type="text" name="address" value="{{Server.Address}}"
+                       required placeholder="10.0.0.1/24"
+                       {{#if (hasField ValidationErrors "address")}}aria-invalid="true"{{/if}}>
+                {{#each ValidationErrors}}{{#if (eq Field "address")}}<small class="field-error">{{Message}}</small>{{/if}}{{/each}}
+            </label>
+        </div>
+
+        <fieldset>
+            <legend>BGP Server Configuration</legend>
+            <label>
+                <input type="checkbox" name="bgpEnabled" {{#if Server.BGPEnabled}}checked{{/if}}>
+                Enable BGP Overlay
+            </label>
+            <div class="grid">
+                <label>
+                    BGP ASN
+                    <input type="number" name="bgpAsn" value="{{#if Server.BGPASN}}{{Server.BGPASN}}{{else}}64512{{/if}}" placeholder="64512" {{#if (hasField ValidationErrors "bgpAsn")}}aria-invalid="true"{{/if}}>
+                    {{#each ValidationErrors}}{{#if (eq Field "bgpAsn")}}<small class="field-error">{{Message}}</small>{{/if}}{{/each}}
+                </label>
+                <label>
+                    BGP Listen Address
+                    <input type="text" name="bgpListenAddress" value="{{Server.BGPListenAddress}}" placeholder="(Optional, wg0 IP)" {{#if (hasField ValidationErrors "bgpListenAddress")}}aria-invalid="true"{{/if}}>
+                    {{#each ValidationErrors}}{{#if (eq Field "bgpListenAddress")}}<small class="field-error">{{Message}}</small>{{/if}}{{/each}}
+                </label>
+                <label>
+                    BGP Listen Port
+                    <input type="number" name="bgpListenPort" value="{{#if Server.BGPListenPort}}{{Server.BGPListenPort}}{{else}}179{{/if}}" placeholder="179" {{#if (hasField ValidationErrors "bgpListenPort")}}aria-invalid="true"{{/if}}>
+                    {{#each ValidationErrors}}{{#if (eq Field "bgpListenPort")}}<small class="field-error">{{Message}}</small>{{/if}}{{/each}}
+                </label>
+            </div>
+        </fieldset>
+
+        <label>
+            Public Endpoint
+            <input type="text" name="endpoint" value="{{Server.Endpoint}}"
+                   placeholder="vpn.example.com:51820">
+            <small>Public address clients connect to. Used when generating client configs.</small>
+        </label>
+
+        <div class="grid">
+            <label>
+                DNS
+                <input type="text" name="dns" value="{{Server.DNS}}"
+                       placeholder="1.1.1.1, 8.8.8.8"
+                       {{#if (hasField ValidationErrors "dns")}}aria-invalid="true"{{/if}}>
+                {{#each ValidationErrors}}{{#if (eq Field "dns")}}<small class="field-error">{{Message}}</small>{{/if}}{{/each}}
+            </label>
+            <label>
+                MTU
+                <input type="number" name="mtu" value="{{#if Server.MTU}}{{Server.MTU}}{{/if}}"
+                       min="1280" max="65535" placeholder="Default (auto)"
+                       {{#if (hasField ValidationErrors "mtu")}}aria-invalid="true"{{/if}}>
+                {{#each ValidationErrors}}{{#if (eq Field "mtu")}}<small class="field-error">{{Message}}</small>{{/if}}{{/each}}
+            </label>
+        </div>
+
+        <details>
+            <summary>Advanced Options</summary>
+            <div class="grid">
+                <label>
+                    Table
+                    <input type="text" name="table" value="{{Server.Table}}" placeholder="auto">
+                </label>
+                <label>
+                    FwMark
+                    <input type="text" name="fwMark" value="{{Server.FwMark}}" placeholder="off">
+                </label>
+            </div>
+            <label>
+                PreUp
+                <textarea name="preUp" rows="2" placeholder="Script to run before interface up">{{Server.PreUp}}</textarea>
+            </label>
+            <label>
+                PostUp
+                <textarea name="postUp" rows="2" placeholder="iptables -A FORWARD...">{{Server.PostUp}}</textarea>
+            </label>
+            <label>
+                PreDown
+                <textarea name="preDown" rows="2" placeholder="Script to run before interface down">{{Server.PreDown}}</textarea>
+            </label>
+            <label>
+                PostDown
+                <textarea name="postDown" rows="2" placeholder="iptables -D FORWARD...">{{Server.PostDown}}</textarea>
+            </label>
+            <label>
+                <input type="checkbox" name="saveConfig" {{#if Server.SaveConfig}}checked{{/if}}>
+                SaveConfig (wg-quick will overwrite the config on shutdown)
+            </label>
+        </details>
+
+        <details>
+            <summary>Server Private Key</summary>
+            <p><small>Changing this will break all existing peer connections.</small></p>
+            <code style="word-break:break-all;">{{Server.PrivateKey}}</code>
+        </details>
+
+        <button type="submit" class="btn btn-primary">Save Configuration</button>
+    </form>
+</div>
+</script>
+
+<script type="text/x-handlebars-template" id="zerotier-tab-template">
+<div id="zerotier">
+    <div class="header-row">
+        <h2>ZeroTier</h2>
+        <div class="btn-group">
+            <button class="btn btn-outline secondary" hx-post="api/zerotier/restart"
+                    hx-target="#zerotier-action-result" hx-swap="innerHTML"
+                    hx-confirm="Restart the ZeroTier service?">
+                Restart Service
+            </button>
+        </div>
+    </div>
+
+    <div id="zerotier-action-result"></div>
+
+    {{#if Success}}<div class="toast toast-success" role="alert">{{Success}}</div>{{/if}}
+    {{#if Error}}<div class="toast toast-error" role="alert">{{Error}}</div>{{/if}}
+    {{> error-summary ValidationErrors}}
+
+    <form hx-put="zerotier" hx-target="#tab-content" hx-swap="innerHTML">
+        <fieldset>
+            <label>
+                <input type="checkbox" name="ztEnabled" {{#if Config.Enabled}}checked{{/if}}>
+                Enable ZeroTier
+            </label>
+            <label>
+                <input type="checkbox" name="ztMasquerade" {{#unless Config.DisableMasquerade}}checked{{/unless}}>
+                Masquerade WireGuard traffic over ZeroTier
+            </label>
+            <small>Disable this when the ZeroTier network already has a route back to the WireGuard subnet.</small>
+            <label>
+                <input type="checkbox" name="ztExcludeAdvertisedRoutesFromMasquerade" {{#if Config.ExcludeAdvertisedRoutesFromMasquerade}}checked{{/if}}>
+                Exclude advertised networks from masquerade
+            </label>
+            <small>Adds NAT bypass rules for enabled peers' advertised IPv4 networks. The ZeroTier network must have routes back to them.</small>
+        </fieldset>
+        <div class="grid">
+            <label>
+                Primary Port
+                <input type="number" name="ztPort" value="{{Port}}" min="1024" max="65535"
+                       placeholder="9993"
+                       {{#if (hasField ValidationErrors "ztPort")}}aria-invalid="true"{{/if}}>
+                <small>UDP port for peer-to-peer traffic. Changing it restarts the service.</small>
+            </label>
+        </div>
+        <button type="submit" class="btn btn-primary">Save Settings</button>
+    </form>
+
+    <h3>Networks</h3>
+    <form hx-post="zerotier/networks" hx-target="#tab-content" hx-swap="innerHTML">
+        <div class="grid">
+            <label>
+                Network ID *
+                <input type="text" name="networkID" required minlength="16" maxlength="16"
+                       placeholder="8056c2e21c000001" pattern="[0-9a-fA-F]{16}">
+            </label>
+            <label>
+                Label
+                <input type="text" name="networkName" maxlength="64" placeholder="e.g. Home LAN">
+            </label>
+        </div>
+        <fieldset>
+            <label><input type="checkbox" name="allowManaged" checked> Allow managed IPs and routes</label>
+            <label><input type="checkbox" name="allowGlobal"> Allow global (public) IP assignments</label>
+            <label><input type="checkbox" name="allowDefault"> Allow default route override</label>
+            <label><input type="checkbox" name="allowDNS"> Allow DNS configuration</label>
+        </fieldset>
+        <button type="submit" class="btn btn-primary">Join Network</button>
+    </form>
+
+    <div id="zerotier-status" hx-get="zerotier/status" hx-trigger="every 2s" hx-swap="innerHTML">
+        {{> zerotier-status this}}
+    </div>
+</div>
+</script>
+
+<script type="text/x-handlebars-template" id="zerotier-status-template">
+{{#unless Config.Enabled}}
+<article class="toast toast-error">ZeroTier is disabled. Enable it above to start the service.</article>
+{{else}}
+    {{#if Snapshot.ServiceErr}}
+    <div class="toast toast-error" role="alert">
+        <div>
+            <strong>ZeroTier service problem</strong>
+            <div>{{Snapshot.ServiceErr}}</div>
+            {{#if Snapshot.Hint}}<div><small>{{Snapshot.Hint}}</small></div>{{/if}}
+        </div>
+    </div>
+    {{/if}}
+    {{#if Snapshot.Err}}<div class="toast toast-error" role="alert">{{Snapshot.Err}}</div>{{/if}}
+
+    <div class="grid" style="margin-bottom: 2rem;">
+        <article>
+            <header><strong>Service</strong></header>
+            {{#if Snapshot.ServiceErr}}
+            <span class="status-dot status-down"></span> Running, degraded
+            {{else if Snapshot.Running}}
+            <span class="status-dot status-up"></span> Running {{Uptime}}
+            {{else}}
+            <span class="status-dot status-down"></span> Not running
+            {{/if}}
+        </article>
+        <article>
+            <header><strong>Node Address</strong></header>
+            {{#if Snapshot.Status}}<code>{{Snapshot.Status.Address}}</code>{{else}}&mdash;{{/if}}
+        </article>
+        <article>
+            <header><strong>My ZeroTier IP</strong></header>
+            {{#if Addresses}}
+                {{#each Addresses}}<div><code>{{this}}</code></div>{{/each}}
+            {{else}}
+                <span class="text-muted">Not assigned yet</span>
+            {{/if}}
+        </article>
+        <article>
+            <header><strong>Online</strong></header>
+            {{#if Snapshot.Status}}
+                {{#if Snapshot.Status.Online}}
+                <span class="status-dot status-up"></span> Online{{#if Snapshot.Status.TCPFallbackActive}} (TCP relay){{/if}}
+                {{else}}
+                <span class="status-dot status-down"></span> Offline
+                {{/if}}
+                <div><small class="text-muted">v{{Snapshot.Status.Version}}</small></div>
+            {{else}}&mdash;{{/if}}
+        </article>
+    </div>
+
+    {{#if Pending}}
+    <h4>Not Joined ({{len Pending}})</h4>
+    {{#each Pending}}
+    <article class="toast toast-error" role="alert">
+        <div>
+            {{#if Name}}{{Name}} &mdash; {{/if}}<code>{{ID}}</code> is configured but the ZeroTier service has not joined it.
+            <div><small>Check the service problem above, or confirm the network ID exists.</small></div>
+        </div>
+    </article>
+    {{/each}}
+    {{/if}}
+
+    <h4>Joined Networks ({{len Networks}})</h4>
+    {{#unless Networks}}
+    <p>No networks joined yet.</p>
+    {{else}}
+    {{#each Networks}}
+    <article style="margin-bottom: 1.5rem;">
+        <header class="flex-row">
+            <strong>
+                {{#if Label}}{{Label}} &mdash; {{/if}}<code>{{ID}}</code>
+                {{#if Name}}<span class="badge badge-via">{{Name}}</span>{{/if}}
+                {{#if (eq Status "OK")}}<span class="badge badge-ok">{{Status}}</span>{{else}}<span class="badge badge-warn">{{Status}}</span>{{/if}}
+            </strong>
+            <button class="btn btn-outline-danger" style="width:auto"
+                    hx-delete="zerotier/networks/{{ID}}"
+                    hx-target="#tab-content" hx-swap="innerHTML"
+                    hx-confirm="Leave network {{ID}}?">
+                Leave
+            </button>
+        </header>
+
+        <p>
+            <small>
+                {{#if AssignedAddresses}}{{#each AssignedAddresses}}{{#if @index}}, {{/if}}<code>{{this}}</code>{{/each}}{{else}}No address assigned{{/if}}
+                {{#if PortDeviceName}} &middot; {{PortDeviceName}}{{/if}}
+                {{#if MTU}} &middot; MTU {{MTU}}{{/if}}
+                {{#if Type}} &middot; {{Type}}{{/if}}
+            </small>
+        </p>
+
+        <p>
+            {{#if (and PortDeviceName (not PortError))}}
+            <span class="stats-rx">&darr; {{#if RxPS}}{{RxPS}} {{/if}}<small class="text-muted">({{Rx}})</small></span>
+            <span class="stats-tx">&uarr; {{#if TxPS}}{{TxPS}} {{/if}}<small class="text-muted">({{Tx}})</small></span>
+            {{else if PortError}}
+            <small class="field-error">No network interface: ZeroTier could not create <code>{{PortDeviceName}}</code> (port error {{PortError}}). Traffic cannot flow over this network.</small>
+            {{else if (eq Status "ACCESS_DENIED")}}
+            <small class="field-error">Not authorized &mdash; approve this node in ZeroTier Central to get an address.</small>
+            {{else}}
+            <small class="text-muted">No interface yet &mdash; waiting for the network configuration.</small>
+            {{/if}}
+        </p>
+
+        
+        <strong><small>Routes received from this network ({{len Routes}})</small></strong>
+        {{#if Routes}}
+        <table role="grid">
+            <thead><tr><th scope="col">Target</th><th scope="col">Via</th><th scope="col">Metric</th></tr></thead>
+            <tbody>
+            {{#each Routes}}
+            <tr>
+                <td><code>{{Target}}</code></td>
+                <td>{{#if Via}}<code>{{Via}}</code>{{else}}<span class="text-muted">on-link ({{../PortDeviceName}})</span>{{/if}}</td>
+                <td>{{Metric}}</td>
+            </tr>
+            {{/each}}
+            </tbody>
+        </table>
+        {{else}}
+        <p><small class="text-muted">No routes pushed by this network.</small></p>
+        {{/if}}
+    </article>
+    {{/each}}
+    {{/unless}}
+
+    <h4>Peers ({{len Peers}})</h4>
+    {{#unless Peers}}
+    <p>No peers known.</p>
+    {{else}}
+    <table role="grid">
+        <thead>
+            <tr>
+                <th scope="col">Address</th>
+                <th scope="col">Role</th>
+                <th scope="col">Version</th>
+                <th scope="col">Latency</th>
+                <th scope="col">Paths</th>
+            </tr>
+        </thead>
+        <tbody>
+            {{#each Peers}}
+            <tr>
+                <td><code>{{Address}}</code></td>
+                <td>{{Role}}</td>
+                <td>{{#if Version}}{{Version}}{{else}}&mdash;{{/if}}</td>
+                <td>{{LatencyText}}</td>
+                <td><small>{{PathText}}</small></td>
+            </tr>
+            {{/each}}
+        </tbody>
+    </table>
+    <p><small class="text-muted">ZeroTier does not report per-peer byte counters; traffic is shown per network interface above.</small></p>
+    {{/unless}}
+{{/unless}}
+</script>
+
+<script type="text/x-handlebars-template" id="bgp-custom-peers-template">
+<div id="bgp-custom-peers-list" {{#if OOB}}hx-swap-oob="true"{{/if}}>
+    <div class="header-row">
+        <h3>Custom BGP Peers</h3>
+        <button class="btn btn-primary" style="width:auto" hx-get="bgp/peers/new" hx-target="#modal-container" hx-swap="innerHTML">+ Add Peer</button>
+    </div>
+    {{#unless Peers}}
+    <p><small class="text-muted">No standalone BGP peers configured. A WireGuard peer can also enable BGP from its own edit form.</small></p>
+    {{else}}
+    {{#each Peers}}
+    <article class="flex-row" style="align-items:center;">
+        <div>
+            <strong>{{Name}}</strong> {{#unless Enabled}}<span class="badge badge-warn">Disabled</span>{{/unless}}
+            <div><small class="text-muted">{{PeerIP}} (AS{{PeerASN}}) &middot; {{#if Connect}}active{{else}}passive{{/if}}{{#if RedistributeConnected}} &middot; local/connected routes{{/if}}{{#if MaxReceivedPrefixLength}} &middot; received max /{{MaxReceivedPrefixLength}}{{/if}}{{#if MaxAdvertisedPrefixLength}} &middot; advertised max /{{MaxAdvertisedPrefixLength}}{{/if}}{{#if RouteFilters}} &middot; {{len RouteFilters}} received filter(s){{/if}}{{#if ExportFilters}} &middot; {{len ExportFilters}} advertised filter(s){{/if}}</small></div>
+        </div>
+        <div class="btn-group">
+            <button class="btn btn-outline" style="width:auto" hx-get="bgp/peers/{{ID}}/edit" hx-target="#modal-container" hx-swap="innerHTML">Edit</button>
+            <button class="btn btn-outline-danger" style="width:auto" hx-delete="bgp/peers/{{ID}}" hx-target="#tab-content" hx-swap="innerHTML" hx-confirm="Delete BGP peer {{Name}}?">Delete</button>
+        </div>
+    </article>
+    {{/each}}
+    {{/unless}}
+</div>
+</script>
+
+<script type="text/x-handlebars-template" id="bgp-peer-form-template">
+<dialog>
+    <article>
+        <header class="flex-row">
+            <p class="mb-0"><strong>{{#if IsNew}}Add BGP Peer{{else}}Edit BGP Peer{{/if}}</strong></p>
+            <button aria-label="Close" class="btn btn-outline secondary mb-0" style="padding: 0.1rem 0.6rem" onclick="closeModal()">X</button>
+        </header>
+        <form {{#if IsNew}}hx-post="bgp/peers"{{else}}hx-put="bgp/peers/{{Peer.ID}}"{{/if}}
+              hx-target="#modal-container" hx-swap="innerHTML">
+
+            {{#if Error}}<div class="toast toast-error" role="alert">{{Error}}</div>{{/if}}
+            {{> error-summary ValidationErrors}}
+
+            <label>
+                Name *
+                <input type="text" name="name" value="{{Peer.Name}}" required maxlength="64"
+                       placeholder="e.g. Route Reflector"
+                       {{#if (hasField ValidationErrors "name")}}aria-invalid="true"{{/if}}>
+                {{#each ValidationErrors}}{{#if (eq Field "name")}}<small class="field-error">{{Message}}</small>{{/if}}{{/each}}
+            </label>
+
+            <input type="hidden" name="bgpEnabled" value="on">
+            <label>
+                <input type="checkbox" name="bgpConnect" {{#if Peer.Connect}}checked{{/if}} title="Actively initiate connection to the peer"> Connect
+            </label>
+            <label>
+                <input type="checkbox" name="bgpRedistributeConnected" {{#if Peer.RedistributeConnected}}checked{{/if}}>
+                Redistribute local and connected routes
+                <small>Advertise this host's active interface addresses and connected networks. Advertised prefix filters still apply.</small>
+            </label>
+
+            <div class="grid">
+                <label>
+                    Peer BGP IP *
+                    <input type="text" name="bgpPeerIP" value="{{Peer.PeerIP}}" placeholder="10.0.0.123" {{#if (hasField ValidationErrors "bgpPeerIP")}}aria-invalid="true"{{/if}}>
+                    {{#each ValidationErrors}}{{#if (eq Field "bgpPeerIP")}}<small class="field-error">{{Message}}</small>{{/if}}{{/each}}
+                </label>
+                <label>
+                    Peer ASN *
+                    <input type="number" name="bgpPeerAsn" value="{{#if Peer.PeerASN}}{{Peer.PeerASN}}{{else}}64512{{/if}}" {{#if (hasField ValidationErrors "bgpPeerAsn")}}aria-invalid="true"{{/if}}>
+                    {{#each ValidationErrors}}{{#if (eq Field "bgpPeerAsn")}}<small class="field-error">{{Message}}</small>{{/if}}{{/each}}
+                </label>
+                <label>
+                    Peer Port *
+                    <input type="number" name="bgpPeerPort" value="179" min="179" max="179" readonly {{#if (hasField ValidationErrors "bgpPeerPort")}}aria-invalid="true"{{/if}}>
+                    <small>The embedded BGP engine currently supports peer port 179.</small>
+                    {{#each ValidationErrors}}{{#if (eq Field "bgpPeerPort")}}<small class="field-error">{{Message}}</small>{{/if}}{{/each}}
+                </label>
+            </div>
+
+            <div class="grid">
+                <label>
+                    Max received prefix length
+                    <input type="number" name="bgpMaxReceivedPrefixLength" value="{{#if Peer.MaxReceivedPrefixLength}}{{Peer.MaxReceivedPrefixLength}}{{/if}}" min="0" max="128" placeholder="Unlimited" {{#if (hasField ValidationErrors "bgpMaxReceivedPrefixLength")}}aria-invalid="true"{{/if}}>
+                    <small>Inclusive. For example, 24 accepts /24 and rejects /25 or longer. Leave blank or use 0 for unlimited.</small>
+                    {{#each ValidationErrors}}{{#if (eq Field "bgpMaxReceivedPrefixLength")}}<small class="field-error">{{Message}}</small>{{/if}}{{/each}}
+                </label>
+                <label>
+                    Max advertised prefix length
+                    <input type="number" name="bgpMaxAdvertisedPrefixLength" value="{{#if Peer.MaxAdvertisedPrefixLength}}{{Peer.MaxAdvertisedPrefixLength}}{{/if}}" min="0" max="128" placeholder="Unlimited" {{#if (hasField ValidationErrors "bgpMaxAdvertisedPrefixLength")}}aria-invalid="true"{{/if}}>
+                    <small>Inclusive. Prefixes longer than this value are not advertised. Leave blank or use 0 for unlimited.</small>
+                    {{#each ValidationErrors}}{{#if (eq Field "bgpMaxAdvertisedPrefixLength")}}<small class="field-error">{{Message}}</small>{{/if}}{{/each}}
+                </label>
+            </div>
+
+            <div style="margin-top: 1rem;">
+                <label>Received Prefix Filters</label>
+                <small>Controls which prefixes received from this peer are accepted. Leave empty to accept everything.</small>
+                <div id="bgp-route-filters-list">
+                    {{#each Peer.RouteFilters}}
+                    <div class="route-filter-row" style="display:flex; gap:0.5rem; margin-bottom:0.5rem;">
+                        <input type="text" name="filterPrefix[]" value="{{Prefix}}" placeholder="Prefix (e.g. 10.1.0.0/16)" style="flex:1">
+                        <select name="filterMatcher[]" style="width:auto">
+                            <option value="exact" {{#if (eq Matcher "exact")}}selected{{/if}}>Exact</option>
+                            <option value="orlonger" {{#if (eq Matcher "orlonger")}}selected{{/if}}>Or Longer</option>
+                        </select>
+                        <select name="filterAction[]" style="width:auto">
+                            <option value="accept" {{#if (eq Action "accept")}}selected{{/if}}>Accept</option>
+                            <option value="reject" {{#if (eq Action "reject")}}selected{{/if}}>Reject</option>
+                        </select>
+                        <button type="button" class="btn btn-outline-danger" style="width:auto" onclick="this.closest('.route-filter-row').remove()">X</button>
+                    </div>
+                    {{/each}}
+                </div>
+                <button type="button" class="btn btn-outline secondary" style="width:auto; margin-top:0.5rem;" onclick="addRouteFilterRow()">+ Add Filter</button>
+            </div>
+
+            <div style="margin-top: 1rem;">
+                <label>Advertised Prefix Filters</label>
+                <small>Controls which locally known prefixes are advertised to this peer. Leave empty to advertise everything.</small>
+                <div id="bgp-export-filters-list">
+                    {{#each Peer.ExportFilters}}
+                    <div class="route-filter-row" style="display:flex; gap:0.5rem; margin-bottom:0.5rem;">
+                        <input type="text" name="exportFilterPrefix[]" value="{{Prefix}}" placeholder="Prefix (e.g. 10.1.0.0/16)" style="flex:1">
+                        <select name="exportFilterMatcher[]" style="width:auto">
+                            <option value="exact" {{#if (eq Matcher "exact")}}selected{{/if}}>Exact</option>
+                            <option value="orlonger" {{#if (eq Matcher "orlonger")}}selected{{/if}}>Or Longer</option>
+                        </select>
+                        <select name="exportFilterAction[]" style="width:auto">
+                            <option value="accept" {{#if (eq Action "accept")}}selected{{/if}}>Accept</option>
+                            <option value="reject" {{#if (eq Action "reject")}}selected{{/if}}>Reject</option>
+                        </select>
+                        <button type="button" class="btn btn-outline-danger" style="width:auto" onclick="this.closest('.route-filter-row').remove()">X</button>
+                    </div>
+                    {{/each}}
+                </div>
+                <button type="button" class="btn btn-outline secondary" style="width:auto; margin-top:0.5rem;" onclick="addRouteFilterRow('bgp-export-filters-list', 'exportFilter')">+ Add Filter</button>
+            </div>
+
+            <fieldset>
+                <label>
+                    <input type="checkbox" name="enabled" {{#if (or Defaults Peer.Enabled)}}checked{{/if}}>
+                    Enabled
+                </label>
+            </fieldset>
+
+            <footer>
+                <button type="button" class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+                <button type="submit" class="btn btn-primary">{{#if IsNew}}Create Peer{{else}}Save Changes{{/if}}</button>
+            </footer>
+        </form>
+    </article>
+</dialog>
+</script>
+
+<script type="text/x-handlebars-template" id="bgp-tab-template">
+<div id="bgp-stats">
+    <div class="header-row">
+        <h2>BGP Statistics</h2>
+    </div>
+
+    {{> bgp-custom-peers CustomPeers}}
+
+    <div id="bgp-live-stats" hx-get="bgp/live-stats" hx-trigger="every 2s" hx-swap="innerHTML">
+        {{> bgp-live-stats BGPStats}}
+    </div>
+</div>
+</script>
+
+<script type="text/x-handlebars-template" id="bgp-live-stats-template">
+    {{#unless Running}}
+    <article class="toast toast-error">
+        BGP Service is currently disabled or not started. Enable it in the Server Configuration.
+    </article>
+    {{else}}
+    <div class="grid" style="margin-bottom: 2rem;">
+        <article>
+            <header><strong>Router ID</strong></header>
+            {{RouterID}}
+        </article>
+        <article>
+            <header><strong>Local ASN</strong></header>
+            {{ASN}}
+        </article>
+        <article>
+            <header><strong>Service Status</strong></header>
+            <span class="status-dot status-up"></span> Running
+        </article>
+    </div>
+
+    <h3>BGP Peers</h3>
+    {{#unless Peers}}
+    <p>No BGP peers configured.</p>
+    {{else}}
+    {{#each Peers}}
+    <article>
+        <header class="flex-row">
+            <strong>{{IP}} (AS{{ASN}})</strong>
+            <span>
+                {{#if (eq State "Established")}}
+                <span class="status-dot status-up"></span> {{State}} &middot; Uptime: {{Uptime}}
+                {{else}}
+                <span class="status-dot status-down"></span> {{State}}
+                {{/if}}
+            </span>
+        </header>
+
+        <p><small>Updates Received: {{UpdatesReceived}} &middot; Prefixes Received: {{len Routes}} &middot; Prefixes Advertised: {{len AdvertisedRoutes}}</small></p>
+
+        {{#if Routes}}
+        <details data-route-key="{{IP}}-received">
+            <summary><strong><small>Received routes ({{len Routes}})</small></strong></summary>
+            <table role="grid">
+                <thead>
+                    <tr>
+                        <th scope="col">Prefix</th>
+                        <th scope="col">Next Hop</th>
+                        <th scope="col">Local Pref</th>
+                        <th scope="col">AS Path</th>
+                        <th scope="col">Status</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {{#each Routes}}
+                    <tr class="{{#if (ne Status "Accepted")}}route-filtered{{/if}} {{#if (gt @index 9)}}hidden-route{{/if}}">
+                        <td><code>{{Prefix}}</code></td>
+                        <td><code>{{NextHop}}</code></td>
+                        <td>{{LocalPref}}</td>
+                        <td>{{#if ASPath}}{{ASPath}}{{else}}Local{{/if}}</td>
+                        <td>
+                            {{#if (eq Status "Accepted")}}<span class="badge badge-ok">{{Status}}</span>
+                            {{else}}<span class="badge badge-via">{{Status}}</span>{{/if}}
+                        </td>
+                    </tr>
+                    {{/each}}
+                </tbody>
+            </table>
+            {{#if (gt (len Routes) 10)}}
+            <button class="btn btn-outline secondary show-all-btn" onclick="showAllRoutes(this)">Show All {{len Routes}} Routes</button>
+            {{/if}}
+        </details>
+        {{/if}}
+
+        {{#if AdvertisedRoutes}}
+        <details data-route-key="{{IP}}-advertised">
+            <summary><strong><small>Advertised routes ({{len AdvertisedRoutes}})</small></strong></summary>
+            <table role="grid">
+                <thead>
+                    <tr>
+                        <th scope="col">Prefix</th>
+                        <th scope="col">Next Hop</th>
+                        <th scope="col">Local Pref</th>
+                        <th scope="col">AS Path</th>
+                        <th scope="col">Status</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {{#each AdvertisedRoutes}}
+                    <tr class="{{#if (gt @index 9)}}hidden-route{{/if}}">
+                        <td><code>{{Prefix}}</code></td>
+                        <td><code>{{NextHop}}</code></td>
+                        <td>{{LocalPref}}</td>
+                        <td>{{#if ASPath}}{{ASPath}}{{else}}Local{{/if}}</td>
+                        <td><span class="badge badge-ok">{{Status}}</span></td>
+                    </tr>
+                    {{/each}}
+                </tbody>
+            </table>
+            {{#if (gt (len AdvertisedRoutes) 10)}}
+            <button class="btn btn-outline secondary show-all-btn" onclick="showAllRoutes(this)">Show All {{len AdvertisedRoutes}} Routes</button>
+            {{/if}}
+        </details>
+        {{/if}}
+
+    </article>
+    {{/each}}
+    {{/unless}}
+    {{/unless}}
+</script>

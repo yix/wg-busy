@@ -121,25 +121,19 @@ func (h *handler) buildZeroTierData() zerotierData {
 // GetZeroTierTab handles GET /zerotier.
 func (h *handler) GetZeroTierTab(w http.ResponseWriter, r *http.Request) {
 	data := h.buildZeroTierData()
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	if err := templates.ExecuteTemplate(w, "zerotier-tab", data); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-	}
+	writePageJSON(w, http.StatusOK, "zerotier-tab", data, nil)
 }
 
 // GetZeroTierStatus handles GET /zerotier/status — the fragment htmx polls.
 func (h *handler) GetZeroTierStatus(w http.ResponseWriter, r *http.Request) {
 	data := h.buildZeroTierData()
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	if err := templates.ExecuteTemplate(w, "zerotier-status", data); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-	}
+	writePageJSON(w, http.StatusOK, "zerotier-status", data, nil)
 }
 
 // UpdateZeroTier handles PUT /zerotier — service and routing settings.
 func (h *handler) UpdateZeroTier(w http.ResponseWriter, r *http.Request) {
 	if err := r.ParseForm(); err != nil {
-		http.Error(w, "Bad request", http.StatusBadRequest)
+		writePageError(w, http.StatusBadRequest, fmt.Errorf("bad request"))
 		return
 	}
 
@@ -163,7 +157,7 @@ func (h *handler) UpdateZeroTier(w http.ResponseWriter, r *http.Request) {
 // JoinZeroTierNetwork handles POST /zerotier/networks.
 func (h *handler) JoinZeroTierNetwork(w http.ResponseWriter, r *http.Request) {
 	if err := r.ParseForm(); err != nil {
-		http.Error(w, "Bad request", http.StatusBadRequest)
+		writePageError(w, http.StatusBadRequest, fmt.Errorf("bad request"))
 		return
 	}
 
@@ -210,38 +204,39 @@ func (h *handler) LeaveZeroTierNetwork(w http.ResponseWriter, r *http.Request) {
 
 // RestartZeroTier handles POST /api/zerotier/restart.
 func (h *handler) RestartZeroTier(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-
 	if h.zt == nil {
-		_ = templates.ExecuteTemplate(w, "toast-error", "ZeroTier supervisor is not available.")
+		toast := toastData{Kind: "error", Message: "ZeroTier supervisor is not available."}
+		writePageJSON(w, http.StatusOK, "empty", struct{}{}, &toast)
 		return
 	}
 	if err := h.zt.Restart(); err != nil {
 		logRejected(r, err)
-		_ = templates.ExecuteTemplate(w, "toast-error", fmt.Sprintf("Restart failed: %v", err))
+		toast := toastData{Kind: "error", Message: fmt.Sprintf("Restart failed: %v", err)}
+		writePageJSON(w, http.StatusOK, "empty", struct{}{}, &toast)
 		return
 	}
-	_ = templates.ExecuteTemplate(w, "toast-success", "ZeroTier service restarting.")
+	toast := toastData{Kind: "success", Message: "ZeroTier service restarting."}
+	writePageJSON(w, http.StatusOK, "empty", struct{}{}, &toast)
 }
 
 // respondZeroTier re-renders the tab, reporting validation errors the same way
 // the peer and server forms do.
 func (h *handler) respondZeroTier(w http.ResponseWriter, r *http.Request, writeErr error, success string) {
 	data := h.buildZeroTierData()
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-
 	if writeErr != nil {
 		logRejected(r, writeErr)
 		if ve, ok := writeErr.(models.ValidationErrors); ok {
 			data.ValidationErrors = ve
-			w.WriteHeader(http.StatusUnprocessableEntity)
+			writePageJSON(w, http.StatusUnprocessableEntity, "zerotier-tab", data, nil)
+			return
 		} else if _, ok := applyError(writeErr); ok {
 			data.Error = writeErr.Error()
 		} else {
 			data.Error = writeErr.Error()
-			w.WriteHeader(http.StatusInternalServerError)
+			writePageJSON(w, http.StatusInternalServerError, "zerotier-tab", data, nil)
+			return
 		}
-		_ = templates.ExecuteTemplate(w, "zerotier-tab", data)
+		writePageJSON(w, http.StatusOK, "zerotier-tab", data, nil)
 		return
 	}
 
@@ -251,7 +246,7 @@ func (h *handler) respondZeroTier(w http.ResponseWriter, r *http.Request, writeE
 
 	data = h.buildZeroTierData()
 	data.Success = success
-	_ = templates.ExecuteTemplate(w, "zerotier-tab", data)
+	writePageJSON(w, http.StatusOK, "zerotier-tab", data, nil)
 }
 
 // reconcileGrace is how long a save waits for the supervisor to pick the change up.
