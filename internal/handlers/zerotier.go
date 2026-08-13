@@ -136,7 +136,7 @@ func (h *handler) GetZeroTierStatus(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// UpdateZeroTier handles PUT /zerotier — the on/off toggle and port.
+// UpdateZeroTier handles PUT /zerotier — service and routing settings.
 func (h *handler) UpdateZeroTier(w http.ResponseWriter, r *http.Request) {
 	if err := r.ParseForm(); err != nil {
 		http.Error(w, "Bad request", http.StatusBadRequest)
@@ -149,6 +149,7 @@ func (h *handler) UpdateZeroTier(w http.ResponseWriter, r *http.Request) {
 	writeErr := h.store.Write(func(cfg *models.AppConfig) error {
 		cfg.ZeroTier.Enabled = enabled
 		cfg.ZeroTier.Port = uint16(port)
+		cfg.ZeroTier.DisableMasquerade = r.FormValue("ztMasquerade") != "on"
 		if errs := cfg.ZeroTier.Validate(); len(errs) > 0 {
 			return errs
 		}

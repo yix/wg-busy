@@ -116,7 +116,7 @@ const masqueradeSpec = "POSTROUTING -o zt+ -j MASQUERADE"
 // zeroTierMasquerade returns the NAT commands for ZeroTier egress.
 // add=false renders the teardown.
 func zeroTierMasquerade(cfg models.AppConfig, add bool) []string {
-	if !cfg.ZeroTier.Enabled {
+	if !cfg.ZeroTier.Enabled || cfg.ZeroTier.DisableMasquerade {
 		return nil
 	}
 	if add {

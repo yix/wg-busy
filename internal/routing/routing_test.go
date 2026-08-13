@@ -345,6 +345,16 @@ func TestZeroTierMasquerade(t *testing.T) {
 	if strings.Contains(off, "MASQUERADE") {
 		t.Errorf("masquerade rule emitted while ZeroTier is disabled:\n%s", off)
 	}
+
+	// Existing configurations default to masquerading, but the ZeroTier setting
+	// can explicitly disable it when the remote network has a return route.
+	cfg.ZeroTier.Enabled = true
+	cfg.ZeroTier.DisableMasquerade = true
+	disabled := strings.Join(GeneratePostUpCommands(cfg, gateways), "\n") +
+		strings.Join(GeneratePostDownCommands(cfg, gateways), "\n")
+	if strings.Contains(disabled, "MASQUERADE") {
+		t.Errorf("masquerade rule emitted while the option is disabled:\n%s", disabled)
+	}
 }
 
 // Policy routes do not depend on exit nodes; a config with only policy routes

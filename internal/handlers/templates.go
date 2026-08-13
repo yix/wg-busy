@@ -527,6 +527,11 @@ var templates = template.Must(template.New("").Funcs(template.FuncMap{
                 <input type="checkbox" name="ztEnabled" {{if .Config.Enabled}}checked{{end}}>
                 Enable ZeroTier
             </label>
+            <label>
+                <input type="checkbox" name="ztMasquerade" {{if not .Config.DisableMasquerade}}checked{{end}}>
+                Masquerade WireGuard traffic over ZeroTier
+            </label>
+            <small>Disable this when the ZeroTier network already has a route back to the WireGuard subnet.</small>
         </fieldset>
         <div class="grid">
             <label>
