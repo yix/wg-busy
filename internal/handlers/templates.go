@@ -754,7 +754,7 @@ var templates = template.Must(template.New("").Funcs(template.FuncMap{
     <article class="flex-row" style="align-items:center;">
         <div>
             <strong>{{.Name}}</strong> {{if not .Enabled}}<span class="badge badge-warn">Disabled</span>{{end}}
-            <div><small class="text-muted">{{.PeerIP}} (AS{{.PeerASN}}) &middot; {{if .Connect}}active{{else}}passive{{end}}{{if .RouteFilters}} &middot; {{len .RouteFilters}} received filter(s){{end}}{{if .ExportFilters}} &middot; {{len .ExportFilters}} advertised filter(s){{end}}</small></div>
+            <div><small class="text-muted">{{.PeerIP}} (AS{{.PeerASN}}) &middot; {{if .Connect}}active{{else}}passive{{end}}{{if .RedistributeConnected}} &middot; local/connected routes{{end}}{{if .RouteFilters}} &middot; {{len .RouteFilters}} received filter(s){{end}}{{if .ExportFilters}} &middot; {{len .ExportFilters}} advertised filter(s){{end}}</small></div>
         </div>
         <div class="btn-group">
             <button class="btn btn-outline" style="width:auto" hx-get="bgp/peers/{{.ID}}/edit" hx-target="#modal-container" hx-swap="innerHTML">Edit</button>

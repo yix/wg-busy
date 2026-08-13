@@ -72,3 +72,17 @@ func TestVersionEndpointReturnsBuildVersion(t *testing.T) {
 		t.Fatalf("version response = %q, want v0.0.1", got)
 	}
 }
+
+func TestCustomBGPPeerFormIncludesRedistributeConnectedSetting(t *testing.T) {
+	var rendered strings.Builder
+	data := bgpPeerFormData{Peer: models.BGPPeer{RedistributeConnected: true}}
+	if err := templates.ExecuteTemplate(&rendered, "bgp-peer-form", data); err != nil {
+		t.Fatal(err)
+	}
+
+	body := rendered.String()
+	if !strings.Contains(body, `name="bgpRedistributeConnected" checked`) ||
+		!strings.Contains(body, "Redistribute local and connected routes") {
+		t.Fatalf("custom BGP peer form is missing redistribute-connected setting: %s", body)
+	}
+}
