@@ -96,7 +96,19 @@
                 evt.detail.shouldSwap = true;
                 evt.detail.isError = false;
             }
+
+            // The BGP tab polls this fragment every 2s. Without this, an open
+            // "Received/Advertised routes" panel would fold itself shut (and any
+            // "Show All Routes" click would un-expand) on every single tick.
+            if (evt.detail.target && evt.detail.target.id === 'bgp-live-stats') {
+                bgpRouteUIState = {};
+                evt.detail.target.querySelectorAll('details[data-route-key]').forEach(function (d) {
+                    bgpRouteUIState[d.dataset.routeKey] = { open: d.open, showAll: d.dataset.showAll === '1' };
+                });
+            }
         });
+
+        var bgpRouteUIState = {};
 
         function showToast(msg) {
             var container = document.getElementById('toast-container');
@@ -134,6 +146,18 @@
                 if (dialog && !dialog.open) {
                     dialog.showModal();
                 }
+            }
+
+            if (evt.detail.target.id === 'bgp-live-stats') {
+                evt.detail.target.querySelectorAll('details[data-route-key]').forEach(function (d) {
+                    var state = bgpRouteUIState[d.dataset.routeKey];
+                    if (!state) return;
+                    if (state.open) d.open = true;
+                    if (state.showAll) {
+                        var btn = d.querySelector('.show-all-btn');
+                        if (btn) showAllRoutes(btn);
+                    }
+                });
             }
         });
 
@@ -174,7 +198,9 @@
 
         function showAllRoutes(btn) {
             btn.style.display = 'none';
-            btn.closest('details').querySelectorAll('.hidden-route').forEach(function (row) {
+            var details = btn.closest('details');
+            details.dataset.showAll = '1'; // survives the next poll swap, see htmx:beforeSwap/afterSwap above
+            details.querySelectorAll('.hidden-route').forEach(function (row) {
                 row.classList.remove('hidden-route');
             });
         }

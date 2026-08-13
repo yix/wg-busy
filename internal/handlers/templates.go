@@ -910,7 +910,7 @@ var templates = template.Must(template.New("").Funcs(template.FuncMap{
         <p><small>Updates Received: {{.UpdatesReceived}} &middot; Prefixes Received: {{len .Routes}} &middot; Prefixes Advertised: {{len .AdvertisedRoutes}}</small></p>
 
         {{if .Routes}}
-        <details>
+        <details data-route-key="{{.IP}}-received">
             <summary><strong><small>Received routes ({{len .Routes}})</small></strong></summary>
             <table role="grid">
                 <thead>
@@ -938,13 +938,13 @@ var templates = template.Must(template.New("").Funcs(template.FuncMap{
                 </tbody>
             </table>
             {{if gt (len .Routes) 10}}
-            <button class="btn btn-outline secondary" onclick="showAllRoutes(this)">Show All {{len .Routes}} Routes</button>
+            <button class="btn btn-outline secondary show-all-btn" onclick="showAllRoutes(this)">Show All {{len .Routes}} Routes</button>
             {{end}}
         </details>
         {{end}}
 
         {{if .AdvertisedRoutes}}
-        <details>
+        <details data-route-key="{{.IP}}-advertised">
             <summary><strong><small>Advertised routes ({{len .AdvertisedRoutes}})</small></strong></summary>
             <table role="grid">
                 <thead>
@@ -969,7 +969,7 @@ var templates = template.Must(template.New("").Funcs(template.FuncMap{
                 </tbody>
             </table>
             {{if gt (len .AdvertisedRoutes) 10}}
-            <button class="btn btn-outline secondary" onclick="showAllRoutes(this)">Show All {{len .AdvertisedRoutes}} Routes</button>
+            <button class="btn btn-outline secondary show-all-btn" onclick="showAllRoutes(this)">Show All {{len .AdvertisedRoutes}} Routes</button>
             {{end}}
         </details>
         {{end}}
