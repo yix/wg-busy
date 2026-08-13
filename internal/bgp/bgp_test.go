@@ -65,6 +65,19 @@ func TestExtraListenHostsIncludesZeroTierAddressesUnlessWildcard(t *testing.T) {
 	}
 }
 
+func TestSortPeerStatsIsStableByIPAcrossRuns(t *testing.T) {
+	unsorted := []models.BGPPeerStats{
+		{IP: "10.0.0.3"}, {IP: "10.0.0.1"}, {IP: "10.0.0.2"},
+	}
+	sortPeerStats(unsorted)
+	want := []string{"10.0.0.1", "10.0.0.2", "10.0.0.3"}
+	for i, p := range unsorted {
+		if p.IP != want[i] {
+			t.Fatalf("sortPeerStats order = %v, want %v", unsorted, want)
+		}
+	}
+}
+
 func TestDesiredPeersRejectsUnsupportedRuntimeIdentity(t *testing.T) {
 	registry := vrf.NewVRFRegistry()
 	defVRF := registry.CreateVRFIfNotExists(vrf.DefaultVRFName, 0)

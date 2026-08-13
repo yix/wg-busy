@@ -169,5 +169,13 @@ func GetBGPStats() *models.BGPStats {
 		res.Peers = append(res.Peers, peerStat)
 	}
 
+	// bio-rd's Metrics() does not guarantee peer order, so without this the
+	// BGP tab's peer list would reshuffle on every 2s poll.
+	sortPeerStats(res.Peers)
+
 	return res
+}
+
+func sortPeerStats(peers []models.BGPPeerStats) {
+	sort.Slice(peers, func(i, j int) bool { return peers[i].IP < peers[j].IP })
 }
