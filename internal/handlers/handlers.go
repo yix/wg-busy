@@ -90,13 +90,17 @@ func logErrors(next http.Handler) http.Handler {
 }
 
 // NewRouter creates the HTTP mux with all routes registered.
-func NewRouter(store *config.Store, webFS fs.FS, stats *wgstats.Collector, zt *zerotier.Supervisor) http.Handler {
+func NewRouter(store *config.Store, webFS fs.FS, stats *wgstats.Collector, zt *zerotier.Supervisor, version string) http.Handler {
 	h := &handler{store: store, stats: stats, zt: zt}
 
 	mux := http.NewServeMux()
 
 	// Static files (index.html).
 	mux.Handle("GET /", http.FileServerFS(webFS))
+	mux.HandleFunc("GET /version", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		_, _ = fmt.Fprint(w, version)
+	})
 
 	// Stats bar fragment (includes OOB peer stats).
 	mux.HandleFunc("GET /stats", h.GetCombinedStats)

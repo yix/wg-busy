@@ -5,6 +5,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"testing/fstest"
 	"time"
 
 	"github.com/yix/wg-busy/internal/config"
@@ -59,5 +60,15 @@ func TestPeerLastSeenUsesNewestTimestampAndExactHoverText(t *testing.T) {
 	body := rendered.String()
 	if !strings.Contains(body, `datetime="`+exact+`" title="`+exact+`"`) || !strings.Contains(body, "last seen") {
 		t.Fatalf("last-seen timestamp missing from peer row: %s", body)
+	}
+}
+
+func TestVersionEndpointReturnsBuildVersion(t *testing.T) {
+	router := NewRouter(nil, fstest.MapFS{"index.html": {Data: []byte("ok")}}, nil, nil, "v0.0.1")
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, httptest.NewRequest("GET", "/version", nil))
+
+	if got := recorder.Body.String(); got != "v0.0.1" {
+		t.Fatalf("version response = %q, want v0.0.1", got)
 	}
 }

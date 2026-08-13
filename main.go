@@ -135,7 +135,7 @@ func main() {
 		log.Fatalf("embedded filesystem: %v", err)
 	}
 
-	mux := handlers.NewRouter(store, webContent, stats, zt)
+	mux := handlers.NewRouter(store, webContent, stats, zt, version)
 
 	log.Printf("wg-busy %s listening on %s", version, *listen)
 	if err := http.ListenAndServe(*listen, mux); err != nil {

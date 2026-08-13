@@ -91,6 +91,10 @@ hgroup p {
   font-size: 1.125rem;
 }
 
+.app-version {
+  opacity: 0.7;
+}
+
 a {
   color: var(--primary);
   text-decoration: none;
