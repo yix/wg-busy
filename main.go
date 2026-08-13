@@ -118,6 +118,11 @@ func main() {
 
 	// Start stats collector.
 	stats := wgstats.NewCollector()
+	stats.OnHandshakes(func(seen map[string]time.Time) {
+		if err := store.RecordPeerLastSeen(seen); err != nil {
+			log.Printf("persisting WireGuard peer last-seen times: %v", err)
+		}
+	})
 	if !wgStartedAt.IsZero() {
 		stats.Start(wgStartedAt)
 	} else {

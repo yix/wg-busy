@@ -46,18 +46,19 @@ type HistoryPoint struct {
 
 // Collector polls wg show and collects stats.
 type Collector struct {
-	mu          sync.RWMutex
-	startedAt   time.Time
-	iface       InterfaceStats
-	peers       map[string]*PeerStats     // keyed by public key
-	history     []HistoryPoint            // ring buffer
-	peerHistory map[string][]HistoryPoint // per-peer ring buffer
-	prevRx      int64
-	prevTx      int64
-	prevPeerRx  map[string]int64
-	prevPeerTx  map[string]int64
-	prevTime    time.Time
-	isUp        bool
+	mu           sync.RWMutex
+	startedAt    time.Time
+	iface        InterfaceStats
+	peers        map[string]*PeerStats     // keyed by public key
+	history      []HistoryPoint            // ring buffer
+	peerHistory  map[string][]HistoryPoint // per-peer ring buffer
+	prevRx       int64
+	prevTx       int64
+	prevPeerRx   map[string]int64
+	prevPeerTx   map[string]int64
+	prevTime     time.Time
+	isUp         bool
+	onHandshakes func(map[string]time.Time)
 }
 
 // NewCollector creates a new stats collector.
@@ -68,6 +69,14 @@ func NewCollector() *Collector {
 		prevPeerRx:  make(map[string]int64),
 		prevPeerTx:  make(map[string]int64),
 	}
+}
+
+// OnHandshakes registers a callback for the latest non-zero peer handshake
+// timestamps. The callback runs after each successful poll, outside the lock.
+func (c *Collector) OnHandshakes(fn func(map[string]time.Time)) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.onHandshakes = fn
 }
 
 // Start begins background polling. Call with startedAt set to when wg was brought up.
@@ -172,16 +181,17 @@ func (c *Collector) poll() {
 	now := time.Now()
 
 	c.mu.Lock()
-	defer c.mu.Unlock()
 
 	if err != nil {
 		c.isUp = false
+		c.mu.Unlock()
 		return
 	}
 
 	c.isUp = true
 	lines := strings.Split(strings.TrimSpace(string(output)), "\n")
 	if len(lines) < 1 {
+		c.mu.Unlock()
 		return
 	}
 
@@ -189,6 +199,7 @@ func (c *Collector) poll() {
 	// Parse peer lines.
 	var totalRx, totalTx int64
 	seenPeers := make(map[string]bool)
+	handshakes := make(map[string]time.Time)
 
 	for _, line := range lines[1:] {
 		fields := strings.Split(line, "\t")
@@ -209,6 +220,7 @@ func (c *Collector) poll() {
 		var handshake time.Time
 		if handshakeUnix > 0 {
 			handshake = time.Unix(handshakeUnix, 0)
+			handshakes[pubKey] = handshake
 		}
 
 		// Compute per-peer bandwidth.
@@ -282,6 +294,12 @@ func (c *Collector) poll() {
 	c.history = append(c.history, HistoryPoint{Time: now, RxPS: rxPS, TxPS: txPS})
 	if len(c.history) > HistorySize {
 		c.history = c.history[len(c.history)-HistorySize:]
+	}
+
+	onHandshakes := c.onHandshakes
+	c.mu.Unlock()
+	if onHandshakes != nil && len(handshakes) > 0 {
+		onHandshakes(handshakes)
 	}
 }
 

@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/yix/wg-busy/internal/models"
 	"github.com/yix/wg-busy/internal/wireguard"
@@ -94,6 +95,37 @@ func TestReadReturnsIndependentSnapshot(t *testing.T) {
 	snapshot.ZeroTier.Networks[0].Name = "changed"
 	if got := s.config.ZeroTier.Networks[0].Name; got != "stored" {
 		t.Fatalf("store was mutated through Read snapshot: %q", got)
+	}
+}
+
+func TestRecordPeerLastSeenPersistsOnlyNewerHandshake(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.yaml")
+	seen := time.Date(2026, time.August, 13, 15, 4, 5, 0, time.UTC)
+	s := &Store{
+		configPath: configPath,
+		config: models.AppConfig{Peers: []models.Peer{{
+			PublicKey: "peer-key",
+		}}},
+	}
+
+	if err := s.RecordPeerLastSeen(map[string]time.Time{"peer-key": seen}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.RecordPeerLastSeen(map[string]time.Time{"peer-key": seen.Add(-time.Hour)}); err != nil {
+		t.Fatal(err)
+	}
+
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var persisted models.AppConfig
+	if err := yaml.Unmarshal(data, &persisted); err != nil {
+		t.Fatal(err)
+	}
+	if got := persisted.Peers[0].LastSeen; !got.Equal(seen) {
+		t.Fatalf("persisted lastSeen = %s, want %s", got, seen)
 	}
 }
 

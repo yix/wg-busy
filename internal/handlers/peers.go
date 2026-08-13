@@ -25,7 +25,8 @@ type peerRowData struct {
 	TransferTx   string
 	CurrentRxPS  string
 	CurrentTxPS  string
-	Handshake    string
+	LastSeen     string
+	LastSeenAt   string
 	SparklineSVG string
 	HasStats     bool
 }
@@ -72,30 +73,32 @@ func (h *handler) buildPeersListData() peersListData {
 	}
 
 	for _, p := range cfg.Peers {
-		row := peerRowData{Peer: p}
-		if p.ExitNodeID != "" {
-			row.ExitNodeName = exitNodeNames[p.ExitNodeID]
-		}
-
-		// Attach stats by public key.
-		if allPeerStats != nil {
-			if ps, ok := allPeerStats[p.PublicKey]; ok {
-				row.HasStats = true
-				row.Endpoint = ps.Endpoint
-				row.TransferRx = wgstats.FormatBytes(ps.TransferRx)
-				row.TransferTx = wgstats.FormatBytes(ps.TransferTx)
-				row.CurrentRxPS = wgstats.FormatBytesPerSec(ps.CurrentRxPS)
-				row.CurrentTxPS = wgstats.FormatBytesPerSec(ps.CurrentTxPS)
-				row.Handshake = wgstats.FormatHandshake(ps.LatestHandshake)
-				if h.stats != nil {
-					row.SparklineSVG = wgstats.RenderSparklineSVG(h.stats.GetPeerHistory(p.PublicKey), 80, 16)
-				}
-			}
-		}
-
+		row := h.buildPeerRow(p, exitNodeNames[p.ExitNodeID], allPeerStats[p.PublicKey])
 		data.Peers = append(data.Peers, row)
 	}
 	return data
+}
+
+func (h *handler) buildPeerRow(peer models.Peer, exitNodeName string, stats wgstats.PeerStats) peerRowData {
+	row := peerRowData{Peer: peer, ExitNodeName: exitNodeName}
+	lastSeen := peer.LastSeen
+	if stats.PublicKey != "" {
+		row.HasStats = true
+		row.Endpoint = stats.Endpoint
+		row.TransferRx = wgstats.FormatBytes(stats.TransferRx)
+		row.TransferTx = wgstats.FormatBytes(stats.TransferTx)
+		row.CurrentRxPS = wgstats.FormatBytesPerSec(stats.CurrentRxPS)
+		row.CurrentTxPS = wgstats.FormatBytesPerSec(stats.CurrentTxPS)
+		row.SparklineSVG = wgstats.RenderSparklineSVG(h.stats.GetPeerHistory(peer.PublicKey), 80, 16)
+		if stats.LatestHandshake.After(lastSeen) {
+			lastSeen = stats.LatestHandshake
+		}
+	}
+	row.LastSeen = wgstats.FormatHandshake(lastSeen)
+	if !lastSeen.IsZero() {
+		row.LastSeenAt = lastSeen.UTC().Format(time.RFC3339)
+	}
+	return row
 }
 
 // ListPeers returns the peers list HTML fragment.
@@ -441,19 +444,13 @@ func (h *handler) TogglePeer(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
-	data := peerRowData{Peer: peer, ExitNodeName: exitNodeName}
-
-	// Attach stats if available.
+	var stats wgstats.PeerStats
 	if h.stats != nil {
 		if ps := h.stats.GetPeerStats(peer.PublicKey); ps != nil {
-			data.HasStats = true
-			data.Endpoint = ps.Endpoint
-			data.TransferRx = wgstats.FormatBytes(ps.TransferRx)
-			data.TransferTx = wgstats.FormatBytes(ps.TransferTx)
-			data.Handshake = wgstats.FormatHandshake(ps.LatestHandshake)
-			data.SparklineSVG = wgstats.RenderSparklineSVG(h.stats.GetPeerHistory(peer.PublicKey), 80, 16)
+			stats = *ps
 		}
 	}
+	data := h.buildPeerRow(peer, exitNodeName, stats)
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	if err := templates.ExecuteTemplate(w, "peer-row", data); err != nil {
@@ -478,6 +475,7 @@ func (h *handler) RegeneratePeerKeys(w http.ResponseWriter, r *http.Request) {
 
 		p.PrivateKey = privKey
 		p.PublicKey = pubKey
+		p.LastSeen = time.Time{}
 		p.UpdatedAt = time.Now().UTC()
 		return nil
 	})

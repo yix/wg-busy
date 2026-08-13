@@ -5,9 +5,11 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/yix/wg-busy/internal/config"
 	"github.com/yix/wg-busy/internal/models"
+	"github.com/yix/wg-busy/internal/wgstats"
 )
 
 func TestRenderApplyWarningKeepsPersistedMutationOnSuccessPath(t *testing.T) {
@@ -36,5 +38,26 @@ func TestNewDualRolePeerGetsDistinctRoutingTables(t *testing.T) {
 	}
 	if peer.RoutingTableID == peer.PolicyRoutingTableID {
 		t.Fatalf("dual-role peer reused table %d", peer.RoutingTableID)
+	}
+}
+
+func TestPeerLastSeenUsesNewestTimestampAndExactHoverText(t *testing.T) {
+	persisted := time.Date(2026, time.August, 13, 12, 0, 0, 0, time.UTC)
+	observed := persisted.Add(time.Hour)
+	h := &handler{stats: wgstats.NewCollector()}
+	row := h.buildPeerRow(
+		models.Peer{PublicKey: "peer-key", AllowedIPs: "10.0.0.2/32", LastSeen: persisted},
+		"",
+		wgstats.PeerStats{PublicKey: "peer-key", LatestHandshake: observed},
+	)
+
+	var rendered strings.Builder
+	if err := templates.ExecuteTemplate(&rendered, "peer-stats", row); err != nil {
+		t.Fatal(err)
+	}
+	exact := observed.Format(time.RFC3339)
+	body := rendered.String()
+	if !strings.Contains(body, `datetime="`+exact+`" title="`+exact+`"`) || !strings.Contains(body, "last seen") {
+		t.Fatalf("last-seen timestamp missing from peer row: %s", body)
 	}
 }

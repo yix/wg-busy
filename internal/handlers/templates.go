@@ -117,8 +117,9 @@ var templates = template.Must(template.New("").Funcs(template.FuncMap{
 
 {{define "peer-stats"}}
     {{.Peer.AllowedIPs}}
-    {{if .HasStats}} &middot; <span class="stats-rx">&darr;{{.CurrentRxPS}} <small class="text-muted">({{.TransferRx}})</small></span> <span class="stats-tx">&uarr;{{.CurrentTxPS}} <small class="text-muted">({{.TransferTx}})</small></span> &middot; shake {{.Handshake}}{{end}}
+    {{if .HasStats}} &middot; <span class="stats-rx">&darr;{{.CurrentRxPS}} <small class="text-muted">({{.TransferRx}})</small></span> <span class="stats-tx">&uarr;{{.CurrentTxPS}} <small class="text-muted">({{.TransferTx}})</small></span>{{end}}
     {{if not .HasStats}} &middot; Created {{formatTime .Peer.CreatedAt}}{{end}}
+    &middot; last seen {{if .LastSeenAt}}<time datetime="{{.LastSeenAt}}" title="{{.LastSeenAt}}">{{.LastSeen}}</time>{{else}}never{{end}}
     {{if .HasStats}} <span class="peer-sparkline">{{.SparklineSVG | safeHTML}}</span>{{end}}
 {{end}}
 

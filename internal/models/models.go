@@ -214,6 +214,7 @@ type Peer struct {
 
 	CreatedAt time.Time `yaml:"createdAt"`
 	UpdatedAt time.Time `yaml:"updatedAt"`
+	LastSeen  time.Time `yaml:"lastSeen,omitempty"`
 }
 
 // BGPRoute represents a single prefix in the BGP AdjRIBIn or AdjRIBOut.

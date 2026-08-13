@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"time"
 
 	"gopkg.in/yaml.v3"
 
@@ -122,6 +123,36 @@ func (s *Store) Read(fn func(cfg *models.AppConfig)) {
 	snapshot := s.config.Clone()
 	s.mu.RUnlock()
 	fn(&snapshot)
+}
+
+// RecordPeerLastSeen persists newer WireGuard handshake times without
+// reapplying configuration: last-seen data does not change wg0.conf.
+func (s *Store) RecordPeerLastSeen(seen map[string]time.Time) error {
+	if len(seen) == 0 {
+		return nil
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	backup := s.config.Clone()
+	changed := false
+	for i := range s.config.Peers {
+		peer := &s.config.Peers[i]
+		lastSeen, ok := seen[peer.PublicKey]
+		if ok && lastSeen.After(peer.LastSeen) {
+			peer.LastSeen = lastSeen.UTC()
+			changed = true
+		}
+	}
+	if !changed {
+		return nil
+	}
+	if err := s.saveYAML(); err != nil {
+		s.config = backup
+		return err
+	}
+	return nil
 }
 
 // Write executes fn with a write lock, then saves YAML and renders wg0.conf.
