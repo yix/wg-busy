@@ -929,7 +929,7 @@
 </script>
 
 <script type="text/x-handlebars-template" id="bgp-live-stats-template">
-    {{#unless Running}}
+    {{#unless running}}
     <article class="toast toast-error">
         BGP Service is currently disabled or not started. Enable it in the Server Configuration.
     </article>
@@ -937,11 +937,11 @@
     <div class="grid" style="margin-bottom: 2rem;">
         <article>
             <header><strong>Router ID</strong></header>
-            {{RouterID}}
+            {{routerId}}
         </article>
         <article>
             <header><strong>Local ASN</strong></header>
-            {{ASN}}
+            {{asn}}
         </article>
         <article>
             <header><strong>Service Status</strong></header>
@@ -950,27 +950,27 @@
     </div>
 
     <h3>BGP Peers</h3>
-    {{#unless Peers}}
+    {{#unless peers}}
     <p>No BGP peers configured.</p>
     {{else}}
-    {{#each Peers}}
+    {{#each peers}}
     <article>
         <header class="flex-row">
-            <strong>{{IP}} (AS{{ASN}})</strong>
+            <strong>{{ip}} (AS{{asn}})</strong>
             <span>
-                {{#if (eq State "Established")}}
-                <span class="status-dot status-up"></span> {{State}} &middot; Uptime: {{Uptime}}
+                {{#if (eq state "Established")}}
+                <span class="status-dot status-up"></span> {{state}} &middot; Uptime: {{uptime}}
                 {{else}}
-                <span class="status-dot status-down"></span> {{State}}
+                <span class="status-dot status-down"></span> {{state}}
                 {{/if}}
             </span>
         </header>
 
-        <p><small>Updates Received: {{UpdatesReceived}} &middot; Prefixes Received: {{len Routes}} &middot; Prefixes Advertised: {{len AdvertisedRoutes}}</small></p>
+        <p><small>Updates Received: {{updatesReceived}} &middot; Prefixes Received: {{len routes}} &middot; Prefixes Advertised: {{len advertisedRoutes}}</small></p>
 
-        {{#if Routes}}
-        <details data-route-key="{{IP}}-received">
-            <summary><strong><small>Received routes ({{len Routes}})</small></strong></summary>
+        {{#if routes}}
+        <details data-route-key="{{ip}}-received">
+            <summary><strong><small>Received routes ({{len routes}})</small></strong></summary>
             <table role="grid">
                 <thead>
                     <tr>
@@ -982,29 +982,29 @@
                     </tr>
                 </thead>
                 <tbody>
-                    {{#each Routes}}
-                    <tr class="{{#if (ne Status "Accepted")}}route-filtered{{/if}} {{#if (gt @index 9)}}hidden-route{{/if}}">
-                        <td><code>{{Prefix}}</code></td>
-                        <td><code>{{NextHop}}</code></td>
-                        <td>{{LocalPref}}</td>
-                        <td>{{#if ASPath}}{{ASPath}}{{else}}Local{{/if}}</td>
+                    {{#each routes}}
+                    <tr class="{{#if (ne status "Accepted")}}route-filtered{{/if}} {{#if (gt @index 9)}}hidden-route{{/if}}">
+                        <td><code>{{prefix}}</code></td>
+                        <td><code>{{nextHop}}</code></td>
+                        <td>{{localPref}}</td>
+                        <td>{{#if asPath}}{{asPath}}{{else}}Local{{/if}}</td>
                         <td>
-                            {{#if (eq Status "Accepted")}}<span class="badge badge-ok">{{Status}}</span>
-                            {{else}}<span class="badge badge-via">{{Status}}</span>{{/if}}
+                            {{#if (eq status "Accepted")}}<span class="badge badge-ok">{{status}}</span>
+                            {{else}}<span class="badge badge-via">{{status}}</span>{{/if}}
                         </td>
                     </tr>
                     {{/each}}
                 </tbody>
             </table>
-            {{#if (gt (len Routes) 10)}}
-            <button class="btn btn-outline secondary show-all-btn" onclick="showAllRoutes(this)">Show All {{len Routes}} Routes</button>
+            {{#if (gt (len routes) 10)}}
+            <button class="btn btn-outline secondary show-all-btn" onclick="showAllRoutes(this)">Show All {{len routes}} Routes</button>
             {{/if}}
         </details>
         {{/if}}
 
-        {{#if AdvertisedRoutes}}
-        <details data-route-key="{{IP}}-advertised">
-            <summary><strong><small>Advertised routes ({{len AdvertisedRoutes}})</small></strong></summary>
+        {{#if advertisedRoutes}}
+        <details data-route-key="{{ip}}-advertised">
+            <summary><strong><small>Advertised routes ({{len advertisedRoutes}})</small></strong></summary>
             <table role="grid">
                 <thead>
                     <tr>
@@ -1016,19 +1016,19 @@
                     </tr>
                 </thead>
                 <tbody>
-                    {{#each AdvertisedRoutes}}
+                    {{#each advertisedRoutes}}
                     <tr class="{{#if (gt @index 9)}}hidden-route{{/if}}">
-                        <td><code>{{Prefix}}</code></td>
-                        <td><code>{{NextHop}}</code></td>
-                        <td>{{LocalPref}}</td>
-                        <td>{{#if ASPath}}{{ASPath}}{{else}}Local{{/if}}</td>
-                        <td><span class="badge badge-ok">{{Status}}</span></td>
+                        <td><code>{{prefix}}</code></td>
+                        <td><code>{{nextHop}}</code></td>
+                        <td>{{localPref}}</td>
+                        <td>{{#if asPath}}{{asPath}}{{else}}Local{{/if}}</td>
+                        <td><span class="badge badge-ok">{{status}}</span></td>
                     </tr>
                     {{/each}}
                 </tbody>
             </table>
-            {{#if (gt (len AdvertisedRoutes) 10)}}
-            <button class="btn btn-outline secondary show-all-btn" onclick="showAllRoutes(this)">Show All {{len AdvertisedRoutes}} Routes</button>
+            {{#if (gt (len advertisedRoutes) 10)}}
+            <button class="btn btn-outline secondary show-all-btn" onclick="showAllRoutes(this)">Show All {{len advertisedRoutes}} Routes</button>
             {{/if}}
         </details>
         {{/if}}

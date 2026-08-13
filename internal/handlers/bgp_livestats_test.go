@@ -40,7 +40,7 @@ func TestBGPLiveStatsRouteKeysAreStableAcrossPolls(t *testing.T) {
 		t.Fatal(err)
 	}
 	source := string(templateSource)
-	for _, key := range []string{`data-route-key="{{IP}}-received"`, `data-route-key="{{IP}}-advertised"`} {
+	for _, key := range []string{`{{#unless running}}`, `{{#each peers}}`, `data-route-key="{{ip}}-received"`, `data-route-key="{{ip}}-advertised"`} {
 		if !strings.Contains(source, key) {
 			t.Fatalf("missing stable route key %s", key)
 		}
