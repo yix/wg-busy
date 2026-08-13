@@ -90,6 +90,7 @@
     <div class="peer-info">
         <strong>
             {{Peer.Name}}
+            {{#if Peer.BGPEnabled}}<span class="badge badge-via" title="BGP enabled">BGP</span>{{/if}}
             {{#if Peer.IsExitNode}}<span class="badge badge-exit">Exit Node</span>{{/if}}
             {{#if ExitNodeName}}<span class="badge badge-via">via {{ExitNodeName}}</span>{{/if}}
             {{#if Peer.StrictPolicyRouting}}<span class="badge badge-warn" title="Traffic may only use this peer's own routes">Strict</span>{{/if}}

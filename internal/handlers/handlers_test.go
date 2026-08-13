@@ -63,6 +63,16 @@ func TestPeerLastSeenUsesNewestTimestampAndExactHoverText(t *testing.T) {
 	}
 }
 
+func TestPeerRowShowsBGPBadgeWhenEnabled(t *testing.T) {
+	templateSource, err := os.ReadFile("../../web/templates.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(templateSource), `{{#if Peer.BGPEnabled}}<span class="badge badge-via" title="BGP enabled">BGP</span>{{/if}}`) {
+		t.Fatal("peer-row Handlebars template does not conditionally render the BGP badge")
+	}
+}
+
 func TestVersionEndpointReturnsBuildVersion(t *testing.T) {
 	router := NewRouter(nil, fstest.MapFS{"index.html": {Data: []byte("ok")}}, nil, nil, "v0.0.1")
 	recorder := httptest.NewRecorder()
