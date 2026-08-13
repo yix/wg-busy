@@ -3,6 +3,8 @@ package bgp
 import (
 	"log"
 	"sort"
+	"strings"
+	"sync"
 	"time"
 
 	bnet "github.com/bio-routing/bio-rd/net"
@@ -11,6 +13,88 @@ import (
 
 	"github.com/yix/wg-busy/internal/models"
 )
+
+var advertisedRoutesWatcher struct {
+	sync.Mutex
+	once sync.Once
+	fn   func()
+}
+
+// AdvertisedRoutesByPeer returns the live prefixes in each peer's Adj-RIB-Out.
+func AdvertisedRoutesByPeer() map[string][]string {
+	mu.Lock()
+	defer mu.Unlock()
+
+	result := make(map[string][]string)
+	if active == nil {
+		return result
+	}
+	for _, peer := range active.server.GetPeers() {
+		seen := make(map[string]bool)
+		for _, af := range []uint16{packet.AFIIPv4, packet.AFIIPv6} {
+			ribOut := active.server.GetRIBOut(peer.VRF(), peer.Addr(), af, packet.SAFIUnicast)
+			if ribOut == nil {
+				continue
+			}
+			for _, route := range ribOut.Dump() {
+				prefix := route.Prefix().String()
+				if !seen[prefix] {
+					seen[prefix] = true
+					result[peer.Addr().String()] = append(result[peer.Addr().String()], prefix)
+				}
+			}
+		}
+		sort.Strings(result[peer.Addr().String()])
+	}
+	return result
+}
+
+// OnAdvertisedRoutesChanged registers a callback fired when the set of
+// prefixes in any peer's Adj-RIB-Out changes.
+func OnAdvertisedRoutesChanged(fn func()) {
+	advertisedRoutesWatcher.Lock()
+	advertisedRoutesWatcher.fn = fn
+	advertisedRoutesWatcher.Unlock()
+	advertisedRoutesWatcher.once.Do(func() { go watchAdvertisedRoutes() })
+}
+
+func watchAdvertisedRoutes() {
+	last := ""
+	ticker := time.NewTicker(2 * time.Second)
+	defer ticker.Stop()
+	for {
+		routes := AdvertisedRoutesByPeer()
+		signature := advertisedRoutesSignature(routes)
+		if signature != last {
+			last = signature
+			advertisedRoutesWatcher.Lock()
+			fn := advertisedRoutesWatcher.fn
+			advertisedRoutesWatcher.Unlock()
+			if fn != nil {
+				fn()
+			}
+		}
+		<-ticker.C
+	}
+}
+
+func advertisedRoutesSignature(routes map[string][]string) string {
+	peers := make([]string, 0, len(routes))
+	for peer := range routes {
+		peers = append(peers, peer)
+	}
+	sort.Strings(peers)
+	var signature strings.Builder
+	for _, peer := range peers {
+		signature.WriteString(peer)
+		signature.WriteByte('=')
+		prefixes := append([]string(nil), routes[peer]...)
+		sort.Strings(prefixes)
+		signature.WriteString(strings.Join(prefixes, ","))
+		signature.WriteByte(';')
+	}
+	return signature.String()
+}
 
 // bgpStateToString maps the bio-rd BGP FSM state to a human readable string.
 func bgpStateToString(state uint8) string {

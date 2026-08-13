@@ -74,7 +74,7 @@ func TestReconcileRemovesPreviousRulesBeforeAddingNext(t *testing.T) {
 		commands = append(commands, command)
 		return nil, nil
 	}
-	if err := Reconcile(previous, nil, next, nil); err != nil {
+	if err := Reconcile(previous, nil, nil, next, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	joined := strings.Join(commands, "\n")
@@ -106,7 +106,7 @@ func TestReconcileRestoresPreviousStateOnFailure(t *testing.T) {
 		}
 		return nil, nil
 	}
-	if err := Reconcile(previous, nil, next, nil); err == nil {
+	if err := Reconcile(previous, nil, nil, next, nil, nil); err == nil {
 		t.Fatal("Reconcile succeeded after command failure")
 	}
 	if !strings.Contains(strings.Join(commands, "\n"), "ip rule add from 10.0.0.5") {
@@ -363,14 +363,16 @@ func TestZeroTierMasqueradeBypassesAdvertisedNetworksFirst(t *testing.T) {
 			Enabled:                               true,
 			ExcludeAdvertisedRoutesFromMasquerade: true,
 		},
-		Peers: []models.Peer{
-			{Enabled: true, AdvertisedRoutes: []string{"192.0.2.7/24", "192.0.2.0/24", "2001:db8::/64"}},
-			{Enabled: false, AdvertisedRoutes: []string{"198.51.100.0/24"}},
-		},
+		Peers: []models.Peer{{Enabled: true, AdvertisedRoutes: []string{"10.7.77.0/24"}}},
+	}
+	gateways := []models.GatewayNet{{Device: "ztabc", CIDR: "10.147.17.48/24"}}
+	advertised := map[string][]string{
+		"10.147.17.250": {"10.7.31.7/24", "10.7.31.0/24", "10.7.32.0/24", "2001:db8::/64"},
+		"10.0.0.2":      {"198.51.100.0/24"}, // WireGuard BGP peer, not ZeroTier.
 	}
 
-	up := strings.Join(GeneratePostUpCommands(cfg, nil), "\n")
-	accept := "iptables -t nat -I POSTROUTING 1 -s 192.0.2.0/24 -o zt+ -j ACCEPT"
+	up := strings.Join(GeneratePostUpCommandsWithBGP(cfg, gateways, advertised), "\n")
+	accept := "iptables -t nat -I POSTROUTING 1 -s 10.7.31.0/24 -o zt+ -j ACCEPT"
 	masquerade := "iptables -t nat -A POSTROUTING -o zt+ -j MASQUERADE"
 	if strings.Count(up, accept) != 1 {
 		t.Fatalf("advertised network bypass rule count = %d, want 1:\n%s", strings.Count(up, accept), up)
@@ -378,15 +380,47 @@ func TestZeroTierMasqueradeBypassesAdvertisedNetworksFirst(t *testing.T) {
 	if strings.Index(up, accept) > strings.Index(up, masquerade) {
 		t.Fatalf("advertised network bypass is after masquerade:\n%s", up)
 	}
-	for _, excluded := range []string{"2001:db8::/64", "198.51.100.0/24"} {
+	if !strings.Contains(up, "-s 10.7.32.0/24 -o zt+ -j ACCEPT") {
+		t.Fatalf("second route advertised to ZeroTier peer is not bypassed:\n%s", up)
+	}
+	for _, excluded := range []string{"10.7.77.0/24", "2001:db8::/64", "198.51.100.0/24"} {
 		if strings.Contains(up, excluded) {
 			t.Errorf("unexpected bypass for %s:\n%s", excluded, up)
 		}
 	}
 
-	down := strings.Join(GeneratePostDownCommands(cfg, nil), "\n")
-	if !strings.Contains(down, "iptables -t nat -D POSTROUTING -s 192.0.2.0/24 -o zt+ -j ACCEPT || true") {
+	down := strings.Join(GeneratePostDownCommandsWithBGP(cfg, gateways, advertised), "\n")
+	if !strings.Contains(down, "iptables -t nat -D POSTROUTING -s 10.7.31.0/24 -o zt+ -j ACCEPT || true") {
 		t.Fatalf("advertised network bypass is never removed:\n%s", down)
+	}
+}
+
+func TestReconcileReplacesWithdrawnBGPRouteBypasses(t *testing.T) {
+	cfg := models.AppConfig{ZeroTier: models.ZeroTierConfig{
+		Enabled:                               true,
+		ExcludeAdvertisedRoutesFromMasquerade: true,
+	}}
+	gateways := []models.GatewayNet{{Device: "ztabc", CIDR: "10.147.17.48/24"}}
+	previous := map[string][]string{"10.147.17.250": {"10.7.31.0/24"}}
+	next := map[string][]string{"10.147.17.250": {"10.7.32.0/24"}}
+
+	originalUp, originalRun := interfaceUp, runShellCommand
+	t.Cleanup(func() { interfaceUp, runShellCommand = originalUp, originalRun })
+	interfaceUp = func() bool { return true }
+	var commands []string
+	runShellCommand = func(command string) ([]byte, error) {
+		commands = append(commands, command)
+		return nil, nil
+	}
+
+	if err := Reconcile(cfg, gateways, previous, cfg, gateways, next); err != nil {
+		t.Fatal(err)
+	}
+	joined := strings.Join(commands, "\n")
+	remove := strings.Index(joined, "-D POSTROUTING -s 10.7.31.0/24")
+	add := strings.Index(joined, "-I POSTROUTING 1 -s 10.7.32.0/24")
+	if remove < 0 || add < 0 || remove > add {
+		t.Fatalf("withdrawn bypass was not replaced before the new one:\n%s", joined)
 	}
 }
 

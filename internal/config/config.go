@@ -29,6 +29,7 @@ type Store struct {
 	config       models.AppConfig
 	routingState models.AppConfig
 	routingNets  []models.GatewayNet
+	routingBGP   map[string][]string
 	// wgRestartPending stays set until wg-quick has successfully rebuilt the
 	// interface. syncconf cannot apply wg-quick-owned server fields.
 	wgRestartPending bool
@@ -43,6 +44,10 @@ type Store struct {
 	// ztGateways reports the ZeroTier subnets policy routes may use as gateways.
 	// Called while the store lock is held, so it must only read cached state.
 	ztGateways func() []models.GatewayNet
+	// bgpAdvertised reports the prefixes in each peer's live Adj-RIB-Out.
+	// Called while the store lock is held, so the provider must not call back
+	// into the store.
+	bgpAdvertised func() map[string][]string
 }
 
 // ApplyError means persistence succeeded but one or more live services did not
@@ -62,6 +67,14 @@ func (s *Store) SetZeroTierGateways(fn func() []models.GatewayNet) {
 	s.ztGateways = fn
 }
 
+// SetBGPAdvertisedRoutes registers the live per-peer Adj-RIB-Out provider used
+// to build ZeroTier masquerade bypass rules.
+func (s *Store) SetBGPAdvertisedRoutes(fn func() map[string][]string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.bgpAdvertised = fn
+}
+
 // gatewayNets returns every network a policy route gateway may point into.
 // Callers must hold the lock.
 func (s *Store) gatewayNets() []models.GatewayNet {
@@ -70,6 +83,23 @@ func (s *Store) gatewayNets() []models.GatewayNet {
 		zt = s.ztGateways()
 	}
 	return models.GatewayNets(s.config.Server.Address, zt)
+}
+
+// advertisedRoutes returns an independent live Adj-RIB-Out snapshot.
+// Callers must hold the store lock.
+func (s *Store) advertisedRoutes() map[string][]string {
+	if s.bgpAdvertised == nil {
+		return nil
+	}
+	return cloneAdvertisedRoutes(s.bgpAdvertised())
+}
+
+func cloneAdvertisedRoutes(routes map[string][]string) map[string][]string {
+	clone := make(map[string][]string, len(routes))
+	for peer, prefixes := range routes {
+		clone[peer] = append([]string(nil), prefixes...)
+	}
+	return clone
 }
 
 // OnChange registers a callback invoked with the new config after every successful write.
@@ -196,6 +226,7 @@ func (s *Store) Write(fn func(cfg *models.AppConfig) error) error {
 	}
 
 	currentNets := s.gatewayNets()
+	currentBGP := s.advertisedRoutes()
 	var applyErrs []error
 	running, reloadErr := reloadWireGuard(s.wgConfigPath)
 	if reloadErr != nil {
@@ -205,11 +236,12 @@ func (s *Store) Write(fn func(cfg *models.AppConfig) error) error {
 	} else if s.wgRestartPending {
 		applyErrs = append(applyErrs, wireguard.ErrRestartNeeded)
 	} else {
-		if err := routing.Reconcile(s.routingState, s.routingNets, s.config, currentNets); err != nil {
+		if err := routing.Reconcile(s.routingState, s.routingNets, s.routingBGP, s.config, currentNets, currentBGP); err != nil {
 			applyErrs = append(applyErrs, err)
 		} else {
 			s.routingState = s.config.Clone()
 			s.routingNets = append([]models.GatewayNet(nil), currentNets...)
+			s.routingBGP = cloneAdvertisedRoutes(currentBGP)
 		}
 	}
 	// Disabling BGP never depends on wg0 and must stop an existing runtime even
@@ -255,11 +287,13 @@ func (s *Store) ReapplyRouting() error {
 		return err
 	}
 	nets := s.gatewayNets()
-	if err := routing.Reconcile(s.routingState, s.routingNets, s.config, nets); err != nil {
+	advertised := s.advertisedRoutes()
+	if err := routing.Reconcile(s.routingState, s.routingNets, s.routingBGP, s.config, nets, advertised); err != nil {
 		return err
 	}
 	s.routingState = s.config.Clone()
 	s.routingNets = append([]models.GatewayNet(nil), nets...)
+	s.routingBGP = cloneAdvertisedRoutes(advertised)
 	return nil
 }
 
@@ -288,6 +322,7 @@ func (s *Store) MarkWireGuardRestarted() {
 	s.wgHasApplied = true
 	s.routingState = s.config.Clone()
 	s.routingNets = append([]models.GatewayNet(nil), s.gatewayNets()...)
+	s.routingBGP = s.advertisedRoutes()
 }
 
 func (s *Store) saveYAML() error {
@@ -313,8 +348,9 @@ func (s *Store) saveYAML() error {
 
 func (s *Store) renderWGConfig() error {
 	gateways := s.gatewayNets()
-	postUpCmds := routing.GeneratePostUpCommands(s.config, gateways)
-	postDownCmds := routing.GeneratePostDownCommands(s.config, gateways)
+	advertised := s.advertisedRoutes()
+	postUpCmds := routing.GeneratePostUpCommandsWithBGP(s.config, gateways, advertised)
+	postDownCmds := routing.GeneratePostDownCommandsWithBGP(s.config, gateways, advertised)
 
 	content, err := wireguard.RenderServerConfig(s.config, postUpCmds, postDownCmds)
 	if err != nil {

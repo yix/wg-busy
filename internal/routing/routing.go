@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"os/exec"
+	"sort"
 	"strings"
 
 	"github.com/yix/wg-busy/internal/models"
@@ -117,7 +118,7 @@ const masqueradeSpec = "POSTROUTING -o zt+ -j MASQUERADE"
 // ACCEPT rules are inserted before MASQUERADE so advertised networks retain
 // their original source addresses.
 // add=false renders the teardown.
-func zeroTierMasquerade(cfg models.AppConfig, add bool) []string {
+func zeroTierMasquerade(cfg models.AppConfig, gateways []models.GatewayNet, advertisedByPeer map[string][]string, add bool) []string {
 	if !cfg.ZeroTier.Enabled || cfg.ZeroTier.DisableMasquerade {
 		return nil
 	}
@@ -125,11 +126,11 @@ func zeroTierMasquerade(cfg models.AppConfig, add bool) []string {
 	var specs []string
 	if cfg.ZeroTier.ExcludeAdvertisedRoutesFromMasquerade {
 		seen := make(map[string]bool)
-		for _, peer := range cfg.Peers {
-			if !peer.Enabled {
+		for peerIP, advertisedRoutes := range advertisedByPeer {
+			if !strings.HasPrefix(models.DeviceForGateway(peerIP, gateways), "zt") {
 				continue
 			}
-			for _, advertised := range peer.AdvertisedRoutes {
+			for _, advertised := range advertisedRoutes {
 				ip, network, err := net.ParseCIDR(strings.TrimSpace(advertised))
 				if err != nil || ip.To4() == nil || seen[network.String()] {
 					continue
@@ -138,6 +139,7 @@ func zeroTierMasquerade(cfg models.AppConfig, add bool) []string {
 				specs = append(specs, fmt.Sprintf("-s %s -o zt+ -j ACCEPT", network.String()))
 			}
 		}
+		sort.Strings(specs)
 	}
 
 	var commands []string
@@ -267,6 +269,16 @@ func policyRouteCmds(action string, cfg models.AppConfig, gateways []models.Gate
 // Order: first create routing tables for exit nodes, then add rules for peers.
 // gateways are the on-link networks policy route gateways may point into.
 func GeneratePostUpCommands(cfg models.AppConfig, gateways []models.GatewayNet) []string {
+	return generatePostUpCommands(cfg, gateways, nil)
+}
+
+// GeneratePostUpCommandsWithBGP renders routing hooks using the routes
+// currently present in each peer's BGP Adj-RIB-Out.
+func GeneratePostUpCommandsWithBGP(cfg models.AppConfig, gateways []models.GatewayNet, advertisedByPeer map[string][]string) []string {
+	return generatePostUpCommands(cfg, gateways, advertisedByPeer)
+}
+
+func generatePostUpCommands(cfg models.AppConfig, gateways []models.GatewayNet, advertisedByPeer map[string][]string) []string {
 	exitNodes := enabledExitNodes(cfg)
 
 	// No early return when there are no exit nodes: custom policy routes are
@@ -274,7 +286,7 @@ func GeneratePostUpCommands(cfg models.AppConfig, gateways []models.GatewayNet) 
 	cmds := exitNodeRouteCmds("replace", exitNodes)
 
 	// NAT for anything leaving over ZeroTier.
-	cmds = append(cmds, zeroTierMasquerade(cfg, true)...)
+	cmds = append(cmds, zeroTierMasquerade(cfg, gateways, advertisedByPeer, true)...)
 
 	// Policy rules for exit nodes, policy routes, and strict rejects.
 	//
@@ -303,15 +315,15 @@ func applyCommands(cmds []string) error {
 
 // Reconcile removes the previously managed state before installing the next
 // state. If installation fails, it best-effort restores the previous state.
-func Reconcile(previous models.AppConfig, previousGateways []models.GatewayNet, next models.AppConfig, nextGateways []models.GatewayNet) error {
+func Reconcile(previous models.AppConfig, previousGateways []models.GatewayNet, previousAdvertised map[string][]string, next models.AppConfig, nextGateways []models.GatewayNet, nextAdvertised map[string][]string) error {
 	if !interfaceUp() {
 		return nil
 	}
-	if err := applyCommands(GeneratePostDownCommands(previous, previousGateways)); err != nil {
+	if err := applyCommands(generatePostDownCommands(previous, previousGateways, previousAdvertised)); err != nil {
 		return fmt.Errorf("removing previous routing state: %w", err)
 	}
-	if err := applyCommands(GeneratePostUpCommands(next, nextGateways)); err != nil {
-		restoreErr := applyCommands(GeneratePostUpCommands(previous, previousGateways))
+	if err := applyCommands(generatePostUpCommands(next, nextGateways, nextAdvertised)); err != nil {
+		restoreErr := applyCommands(generatePostUpCommands(previous, previousGateways, previousAdvertised))
 		if restoreErr != nil {
 			return errors.Join(fmt.Errorf("installing new routing state: %w", err), fmt.Errorf("restoring previous routing state: %w", restoreErr))
 		}
@@ -323,11 +335,21 @@ func Reconcile(previous models.AppConfig, previousGateways []models.GatewayNet, 
 // GeneratePostDownCommands returns cleanup commands for wg0.conf PostDown.
 // Order: first remove rules, then remove routing tables (reverse of PostUp).
 func GeneratePostDownCommands(cfg models.AppConfig, gateways []models.GatewayNet) []string {
+	return generatePostDownCommands(cfg, gateways, nil)
+}
+
+// GeneratePostDownCommandsWithBGP removes routing hooks rendered from the
+// routes currently present in each peer's BGP Adj-RIB-Out.
+func GeneratePostDownCommandsWithBGP(cfg models.AppConfig, gateways []models.GatewayNet, advertisedByPeer map[string][]string) []string {
+	return generatePostDownCommands(cfg, gateways, advertisedByPeer)
+}
+
+func generatePostDownCommands(cfg models.AppConfig, gateways []models.GatewayNet, advertisedByPeer map[string][]string) []string {
 	exitNodes := enabledExitNodes(cfg)
 
 	// No early return when there are no exit nodes: custom policy routes are
 	// independent of them and must still be emitted.
-	cmds := zeroTierMasquerade(cfg, false)
+	cmds := zeroTierMasquerade(cfg, gateways, advertisedByPeer, false)
 
 	// Remove policy rules first. Deleting by priority is exact, so repeated
 	// apply cycles cannot leave duplicates behind.

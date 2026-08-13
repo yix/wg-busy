@@ -88,6 +88,12 @@ func main() {
 	// Policy routes may use a ZeroTier peer IP as their gateway, so wg0.conf
 	// rendering needs to know which subnets are on-link over which zt device.
 	store.SetZeroTierGateways(zt.GatewayNets)
+	store.SetBGPAdvertisedRoutes(bgp.AdvertisedRoutesByPeer)
+	bgp.OnAdvertisedRoutesChanged(func() {
+		if err := store.ReapplyRouting(); err != nil {
+			log.Printf("applying routing after BGP advertisements changed: %v", err)
+		}
+	})
 	// BGP should also accept sessions from peers reachable only over ZeroTier,
 	// so it needs to know the node's own addresses on joined networks too.
 	bgp.SetZeroTierAddressProvider(zt.GatewayNets)
