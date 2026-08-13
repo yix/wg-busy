@@ -168,7 +168,6 @@ article {
   border: 1px solid var(--border-color);
   border-radius: var(--border-radius-lg);
   padding: 1.5rem;
-  box-shadow: var(--box-shadow);
   margin-bottom: 1.5rem;
 }
 
@@ -570,6 +569,10 @@ dialog article {
   vertical-align: middle;
   margin-left: 0.5rem;
   line-height: 0;
+}
+
+#zerotier-status {
+  margin-top: 1.5rem;
 }
 
 /* Routes a filter rejected: shown, but visibly not in the routing table. */
