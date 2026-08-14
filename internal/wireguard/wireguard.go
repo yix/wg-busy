@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
-	"os"
 	"os/exec"
 	"strings"
 	"text/template"
@@ -53,24 +52,9 @@ func ReloadWGConfig(configPath string) (bool, error) {
 // failure to bring up the new configuration are not.
 func RestartWGConfig(configPath string) error {
 	if _, err := runCommand("ip", []string{"link", "show", "wg0"}, nil); err == nil {
-		// SaveConfig=true makes wg-quick down overwrite this file with live state.
-		// YAML is this application's source of truth, so preserve the freshly
-		// rendered desired config and restore it before bringing the interface up.
-		desired, err := os.ReadFile(configPath)
+		output, err := runCommand("wg-quick", []string{"down", configPath}, nil)
 		if err != nil {
-			return fmt.Errorf("reading WireGuard config %q before restart: %w", configPath, err)
-		}
-		output, downErr := runCommand("wg-quick", []string{"down", configPath}, nil)
-		restoreErr := os.WriteFile(configPath, desired, 0600)
-		if downErr != nil {
-			err := fmt.Errorf("bringing down WireGuard config %q: %w: %s", configPath, downErr, strings.TrimSpace(string(output)))
-			if restoreErr != nil {
-				err = errors.Join(err, fmt.Errorf("restoring WireGuard config %q after failed shutdown: %w", configPath, restoreErr))
-			}
-			return err
-		}
-		if restoreErr != nil {
-			return fmt.Errorf("restoring WireGuard config %q after shutdown: %w", configPath, restoreErr)
+			return fmt.Errorf("bringing down WireGuard config %q: %w: %s", configPath, err, strings.TrimSpace(string(output)))
 		}
 	}
 	output, err := runCommand("wg-quick", []string{"up", configPath}, nil)
@@ -92,8 +76,7 @@ func ServerRequiresRestart(previous, next models.ServerConfig) bool {
 		previous.PreUp != next.PreUp ||
 		previous.PostUp != next.PostUp ||
 		previous.PreDown != next.PreDown ||
-		previous.PostDown != next.PostDown ||
-		previous.SaveConfig != next.SaveConfig
+		previous.PostDown != next.PostDown
 }
 
 // GenerateKeyPair generates a WireGuard private key and derives the public key.
@@ -152,9 +135,6 @@ Table = {{ .Server.Table }}
 {{- end }}
 {{- if .Server.FwMark }}
 FwMark = {{ .Server.FwMark }}
-{{- end }}
-{{- if .Server.SaveConfig }}
-SaveConfig = true
 {{- end }}
 {{- if .Server.PreUp }}
 PreUp = {{ .Server.PreUp }}

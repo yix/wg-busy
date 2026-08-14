@@ -517,10 +517,6 @@
                 PostDown
                 <textarea name="postDown" rows="2" placeholder="iptables -D FORWARD...">{{Server.PostDown}}</textarea>
             </label>
-            <label>
-                <input type="checkbox" name="saveConfig" {{#if Server.SaveConfig}}checked{{/if}}>
-                SaveConfig (wg-quick will overwrite the config on shutdown)
-            </label>
         </details>
 
         <details>

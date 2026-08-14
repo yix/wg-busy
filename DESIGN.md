@@ -96,7 +96,6 @@ type AppConfig struct {
 | PostUp | string | no | max 4096 chars | PostUp |
 | PreDown | string | no | max 4096 chars | PreDown |
 | PostDown | string | no | max 4096 chars | PostDown |
-| SaveConfig | bool | no | boolean | SaveConfig |
 | Endpoint | string | no | host:port (for client config generation) | — |
 
 ### Peer
@@ -334,7 +333,7 @@ the UI reports that configuration was saved but not fully applied and renders th
 so resubmitting cannot duplicate a create/delete operation. **Apply Config** restarts WireGuard and
 then retries routing and BGP reconciliation.
 
-Address, DNS, MTU, Table, FwMark, lifecycle-hook, and SaveConfig changes are owned by `wg-quick`
+Address, DNS, MTU, Table, FwMark, and lifecycle-hook changes are owned by `wg-quick`
 and cannot be applied by `syncconf`. The store tracks them against the last successfully restarted
 server state and keeps returning `ApplyError` until **Apply Config** rebuilds the interface. BGP
 disable is independent: it always stops an active runtime even when wg0 is down or awaiting restart.
@@ -415,7 +414,7 @@ Single HTML page with two tabs controlled by htmx:
 
 ### Server Tab Content
 - ListenPort, Address, Endpoint, DNS, MTU
-- `<details>` for advanced: Table, FwMark, Pre/Post Up/Down, SaveConfig
+- `<details>` for advanced: Table, FwMark, Pre/Post Up/Down
 - Server private key in collapsed `<details>`
 - "Download wg0.conf" and "Apply Config" buttons
 

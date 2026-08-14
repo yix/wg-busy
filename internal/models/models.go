@@ -89,8 +89,6 @@ type ServerConfig struct {
 	PostUp     string `yaml:"postUp,omitempty"`
 	PreDown    string `yaml:"preDown,omitempty"`
 	PostDown   string `yaml:"postDown,omitempty"`
-	SaveConfig bool   `yaml:"saveConfig,omitempty"`
-
 	// BGP
 	BGPEnabled       bool   `yaml:"bgpEnabled,omitempty"`
 	BGPListenAddress string `yaml:"bgpListenAddress,omitempty"`

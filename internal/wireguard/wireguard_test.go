@@ -2,8 +2,6 @@ package wireguard
 
 import (
 	"errors"
-	"os"
-	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -53,10 +51,7 @@ func TestReloadWGConfigSkipsMissingInterface(t *testing.T) {
 }
 
 func TestRestartWGConfigUsesConfiguredPath(t *testing.T) {
-	configPath := filepath.Join(t.TempDir(), "wg0.conf")
-	if err := os.WriteFile(configPath, []byte("desired"), 0600); err != nil {
-		t.Fatal(err)
-	}
+	configPath := "/custom/wg0.conf"
 	var calls [][]string
 	original := runCommand
 	t.Cleanup(func() { runCommand = original })
@@ -96,15 +91,11 @@ func TestRestartWGConfigSkipsDownOnlyWhenInterfaceIsMissing(t *testing.T) {
 }
 
 func TestRestartWGConfigReportsDownFailure(t *testing.T) {
-	configPath := filepath.Join(t.TempDir(), "wg0.conf")
-	if err := os.WriteFile(configPath, []byte("desired"), 0600); err != nil {
-		t.Fatal(err)
-	}
+	configPath := "/custom/wg0.conf"
 	original := runCommand
 	t.Cleanup(func() { runCommand = original })
 	runCommand = func(name string, args []string, _ []byte) ([]byte, error) {
 		if name == "wg-quick" && args[0] == "down" {
-			_ = os.WriteFile(configPath, []byte("partial SaveConfig state"), 0600)
 			return []byte("permission denied"), errors.New("exit 1")
 		}
 		return nil, nil
@@ -113,37 +104,6 @@ func TestRestartWGConfigReportsDownFailure(t *testing.T) {
 	err := RestartWGConfig(configPath)
 	if err == nil || !strings.Contains(err.Error(), "permission denied") {
 		t.Fatalf("RestartWGConfig error = %v", err)
-	}
-	got, readErr := os.ReadFile(configPath)
-	if readErr != nil || string(got) != "desired" {
-		t.Fatalf("config after failed down = %q, err %v", got, readErr)
-	}
-}
-
-func TestRestartWGConfigRestoresDesiredFileAfterSaveConfigDown(t *testing.T) {
-	configPath := filepath.Join(t.TempDir(), "wg0.conf")
-	if err := os.WriteFile(configPath, []byte("desired YAML render"), 0600); err != nil {
-		t.Fatal(err)
-	}
-	original := runCommand
-	t.Cleanup(func() { runCommand = original })
-	runCommand = func(name string, args []string, _ []byte) ([]byte, error) {
-		if name == "wg-quick" && args[0] == "down" {
-			return nil, os.WriteFile(configPath, []byte("live SaveConfig state"), 0600)
-		}
-		if name == "wg-quick" && args[0] == "up" {
-			got, err := os.ReadFile(configPath)
-			if err != nil {
-				return nil, err
-			}
-			if string(got) != "desired YAML render" {
-				return nil, errors.New("wg-quick up received overwritten SaveConfig state")
-			}
-		}
-		return nil, nil
-	}
-	if err := RestartWGConfig(configPath); err != nil {
-		t.Fatal(err)
 	}
 }
 
