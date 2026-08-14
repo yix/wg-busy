@@ -65,8 +65,11 @@
     <span class="stats-sparkline">{{{SparklineSVG}}}</span>
 </div>
 {{#each Peers}}
-<small id="peer-stats-{{Peer.ID}}" hx-swap-oob="true">{{> peer-stats this}}</small>
+<small id="peer-stats-{{ID}}" hx-swap-oob="true">{{> peer-stats this}}</small>
 {{/each}}
+{{#if BGPStats}}
+<div id="bgp-live-stats" hx-swap-oob="true">{{> bgp-live-stats BGPStats}}</div>
+{{/if}}
 </script>
 
 <script type="text/x-handlebars-template" id="peers-list-template">
@@ -125,9 +128,9 @@
 </script>
 
 <script type="text/x-handlebars-template" id="peer-stats-template">
-    {{Peer.AllowedIPs}}
+    {{AllowedIPs}}
     {{#if HasStats}} &middot; <span class="stats-rx">&darr;{{CurrentRxPS}} <small class="text-muted">({{TransferRx}})</small></span> <span class="stats-tx">&uarr;{{CurrentTxPS}} <small class="text-muted">({{TransferTx}})</small></span>{{/if}}
-    {{#unless HasStats}} &middot; Created {{formatTime Peer.CreatedAt}}{{/unless}}
+    {{#unless HasStats}} &middot; Created {{formatTime CreatedAt}}{{/unless}}
     &middot; last seen {{#if LastSeenAt}}<time datetime="{{LastSeenAt}}" title="{{LastSeenAt}}">{{LastSeen}}</time>{{else}}never{{/if}}
     {{#if HasStats}} <span class="peer-sparkline">{{{SparklineSVG}}}</span>{{/if}}
 </script>
@@ -601,13 +604,13 @@
         <button type="submit" class="btn btn-primary">Join Network</button>
     </form>
 
-    <div id="zerotier-status" hx-get="zerotier/status" hx-trigger="every 2s" hx-swap="innerHTML">
-        {{> zerotier-status this}}
-    </div>
+    {{> zerotier-status this}}
 </div>
 </script>
 
 <script type="text/x-handlebars-template" id="zerotier-status-template">
+<div id="zerotier-status"{{#if Config.Enabled}} hx-get="zerotier/status?since={{Revision}}"
+     hx-trigger="load delay:100ms, zerotier-repoll from:body" hx-swap="outerHTML"{{/if}}>
 {{#unless Config.Enabled}}
 <article class="toast toast-error">ZeroTier is disabled. Enable it above to start the service.</article>
 {{else}}
@@ -628,14 +631,14 @@
             {{#if Snapshot.ServiceErr}}
             <span class="status-dot status-down"></span> Running, degraded
             {{else if Snapshot.Running}}
-            <span class="status-dot status-up"></span> Running {{Uptime}}
+            <span class="status-dot status-up"></span> Running
             {{else}}
             <span class="status-dot status-down"></span> Not running
             {{/if}}
         </article>
         <article>
             <header><strong>Node Address</strong></header>
-            {{#if Snapshot.Status}}<code>{{Snapshot.Status.Address}}</code>{{else}}&mdash;{{/if}}
+            {{#if Snapshot.Status}}<code>{{Snapshot.Status.address}}</code>{{else}}&mdash;{{/if}}
         </article>
         <article>
             <header><strong>My ZeroTier IP</strong></header>
@@ -648,12 +651,12 @@
         <article>
             <header><strong>Online</strong></header>
             {{#if Snapshot.Status}}
-                {{#if Snapshot.Status.Online}}
-                <span class="status-dot status-up"></span> Online{{#if Snapshot.Status.TCPFallbackActive}} (TCP relay){{/if}}
+                {{#if Snapshot.Status.online}}
+                <span class="status-dot status-up"></span> Online{{#if Snapshot.Status.tcpFallbackActive}} (TCP relay){{/if}}
                 {{else}}
                 <span class="status-dot status-down"></span> Offline
                 {{/if}}
-                <div><small class="text-muted">v{{Snapshot.Status.Version}}</small></div>
+                <div><small class="text-muted">v{{Snapshot.Status.version}}</small></div>
             {{else}}&mdash;{{/if}}
         </article>
     </div>
@@ -678,34 +681,34 @@
     <article style="margin-bottom: 1.5rem;">
         <header class="flex-row">
             <strong>
-                {{#if Label}}{{Label}} &mdash; {{/if}}<code>{{ID}}</code>
-                {{#if Name}}<span class="badge badge-via">{{Name}}</span>{{/if}}
-                {{#if (eq Status "OK")}}<span class="badge badge-ok">{{Status}}</span>{{else}}<span class="badge badge-warn">{{Status}}</span>{{/if}}
+                {{#if Label}}{{Label}} &mdash; {{/if}}<code>{{id}}</code>
+                {{#if name}}<span class="badge badge-via">{{name}}</span>{{/if}}
+                {{#if (eq status "OK")}}<span class="badge badge-ok">{{status}}</span>{{else}}<span class="badge badge-warn">{{status}}</span>{{/if}}
             </strong>
             <button class="btn btn-outline-danger" style="width:auto"
-                    hx-delete="zerotier/networks/{{ID}}"
+                    hx-delete="zerotier/networks/{{id}}"
                     hx-target="#tab-content" hx-swap="innerHTML"
-                    hx-confirm="Leave network {{ID}}?">
+                    hx-confirm="Leave network {{id}}?">
                 Leave
             </button>
         </header>
 
         <p>
             <small>
-                {{#if AssignedAddresses}}{{#each AssignedAddresses}}{{#if @index}}, {{/if}}<code>{{this}}</code>{{/each}}{{else}}No address assigned{{/if}}
-                {{#if PortDeviceName}} &middot; {{PortDeviceName}}{{/if}}
-                {{#if MTU}} &middot; MTU {{MTU}}{{/if}}
-                {{#if Type}} &middot; {{Type}}{{/if}}
+                {{#if assignedAddresses}}{{#each assignedAddresses}}{{#if @index}}, {{/if}}<code>{{this}}</code>{{/each}}{{else}}No address assigned{{/if}}
+                {{#if portDeviceName}} &middot; {{portDeviceName}}{{/if}}
+                {{#if mtu}} &middot; MTU {{mtu}}{{/if}}
+                {{#if type}} &middot; {{type}}{{/if}}
             </small>
         </p>
 
         <p>
-            {{#if (and PortDeviceName (not PortError))}}
+            {{#if (and portDeviceName (not portError))}}
             <span class="stats-rx">&darr; {{#if RxPS}}{{RxPS}} {{/if}}<small class="text-muted">({{Rx}})</small></span>
             <span class="stats-tx">&uarr; {{#if TxPS}}{{TxPS}} {{/if}}<small class="text-muted">({{Tx}})</small></span>
-            {{else if PortError}}
-            <small class="field-error">No network interface: ZeroTier could not create <code>{{PortDeviceName}}</code> (port error {{PortError}}). Traffic cannot flow over this network.</small>
-            {{else if (eq Status "ACCESS_DENIED")}}
+            {{else if portError}}
+            <small class="field-error">No network interface: ZeroTier could not create <code>{{portDeviceName}}</code> (port error {{portError}}). Traffic cannot flow over this network.</small>
+            {{else if (eq status "ACCESS_DENIED")}}
             <small class="field-error">Not authorized &mdash; approve this node in ZeroTier Central to get an address.</small>
             {{else}}
             <small class="text-muted">No interface yet &mdash; waiting for the network configuration.</small>
@@ -713,16 +716,16 @@
         </p>
 
         
-        <strong><small>Routes received from this network ({{len Routes}})</small></strong>
-        {{#if Routes}}
+        <strong><small>Routes received from this network ({{len routes}})</small></strong>
+        {{#if routes}}
         <table role="grid">
             <thead><tr><th scope="col">Target</th><th scope="col">Via</th><th scope="col">Metric</th></tr></thead>
             <tbody>
-            {{#each Routes}}
+            {{#each routes}}
             <tr>
-                <td><code>{{Target}}</code></td>
-                <td>{{#if Via}}<code>{{Via}}</code>{{else}}<span class="text-muted">on-link ({{../PortDeviceName}})</span>{{/if}}</td>
-                <td>{{Metric}}</td>
+                <td><code>{{target}}</code></td>
+                <td>{{#if via}}<code>{{via}}</code>{{else}}<span class="text-muted">on-link ({{../portDeviceName}})</span>{{/if}}</td>
+                <td>{{metric}}</td>
             </tr>
             {{/each}}
             </tbody>
@@ -751,9 +754,9 @@
         <tbody>
             {{#each Peers}}
             <tr>
-                <td><code>{{Address}}</code></td>
-                <td>{{Role}}</td>
-                <td>{{#if Version}}{{Version}}{{else}}&mdash;{{/if}}</td>
+                <td><code>{{address}}</code></td>
+                <td>{{role}}</td>
+                <td>{{#if version}}{{version}}{{else}}&mdash;{{/if}}</td>
                 <td>{{LatencyText}}</td>
                 <td><small>{{PathText}}</small></td>
             </tr>
@@ -763,6 +766,7 @@
     <p><small class="text-muted">ZeroTier does not report per-peer byte counters; traffic is shown per network interface above.</small></p>
     {{/unless}}
 {{/unless}}
+</div>
 </script>
 
 <script type="text/x-handlebars-template" id="bgp-custom-peers-template">
@@ -923,7 +927,7 @@
 
     {{> bgp-custom-peers CustomPeers}}
 
-    <div id="bgp-live-stats" hx-get="bgp/live-stats" hx-trigger="every 2s" hx-swap="innerHTML">
+    <div id="bgp-live-stats">
         {{> bgp-live-stats BGPStats}}
     </div>
 </div>

@@ -1,6 +1,7 @@
 package zerotier
 
 import (
+	"context"
 	"os/exec"
 	"runtime"
 	"testing"
@@ -58,5 +59,42 @@ func TestWaitForProcess(t *testing.T) {
 	}
 	if waitForProcess(make(chan struct{}), time.Millisecond) {
 		t.Fatal("open process channel completed before timeout")
+	}
+}
+
+func TestSnapshotRevisionIgnoresIdenticalSnapshots(t *testing.T) {
+	s := New(t.TempDir())
+	s.setSnapshot(Snapshot{Enabled: true, Running: true})
+	_, first := s.SnapshotVersion()
+	s.setSnapshot(Snapshot{Enabled: true, Running: true})
+	_, second := s.SnapshotVersion()
+
+	if first == 0 || second != first {
+		t.Fatalf("identical update changed revision: %d -> %d", first, second)
+	}
+}
+
+func TestWaitForChangeWakesOnMeaningfulSnapshotUpdate(t *testing.T) {
+	s := New(t.TempDir())
+	s.setSnapshot(Snapshot{Enabled: true, Running: true})
+	_, revision := s.SnapshotVersion()
+
+	result := make(chan bool, 1)
+	go func() {
+		result <- s.WaitForChange(context.Background(), revision, time.Second)
+	}()
+	time.Sleep(10 * time.Millisecond)
+	s.setSnapshot(Snapshot{Enabled: true, Running: true, Status: &Status{Online: true}})
+
+	if !<-result {
+		t.Fatal("long poll did not wake for changed online status")
+	}
+}
+
+func TestWaitForChangeTimesOutWithoutDuplicateState(t *testing.T) {
+	s := New(t.TempDir())
+	_, revision := s.SnapshotVersion()
+	if s.WaitForChange(context.Background(), revision, time.Millisecond) {
+		t.Fatal("unchanged snapshot was reported as changed")
 	}
 }

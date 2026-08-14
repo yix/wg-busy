@@ -1,8 +1,10 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
+	"net/http"
 	"net/http/httptest"
 	"os"
 	"strings"
@@ -13,6 +15,7 @@ import (
 	"github.com/yix/wg-busy/internal/config"
 	"github.com/yix/wg-busy/internal/models"
 	"github.com/yix/wg-busy/internal/wgstats"
+	"github.com/yix/wg-busy/internal/zerotier"
 )
 
 func TestRenderApplyWarningKeepsPersistedMutationOnSuccessPath(t *testing.T) {
@@ -123,5 +126,83 @@ func TestParseMaxPrefixLengthPreservesInvalidInputForValidation(t *testing.T) {
 		if got := parseMaxPrefixLength(input); got != want {
 			t.Errorf("parseMaxPrefixLength(%q) = %d, want %d", input, got, want)
 		}
+	}
+}
+
+func TestStatsRequestIncludesOnlyActiveScreenData(t *testing.T) {
+	tests := []struct {
+		kind    string
+		present string
+		absent  []string
+	}{
+		{kind: "server", present: `"Data"`, absent: []string{`"Peers"`, `"BGPStats"`}},
+		{kind: "zerotier", present: `"Data"`, absent: []string{`"Peers"`, `"BGPStats"`}},
+		{kind: "bgp", present: `"BGPStats"`, absent: []string{`"Peers"`}},
+	}
+	for _, test := range tests {
+		recorder := httptest.NewRecorder()
+		request := httptest.NewRequest("GET", "/stats?kind="+test.kind, nil)
+		(&handler{}).GetCombinedStats(recorder, request)
+		body := recorder.Body.String()
+		if !strings.Contains(body, test.present) {
+			t.Fatalf("%s stats response lacks %s: %s", test.kind, test.present, body)
+		}
+		for _, absent := range test.absent {
+			if strings.Contains(body, absent) {
+				t.Fatalf("%s stats response unexpectedly contains %s: %s", test.kind, absent, body)
+			}
+		}
+	}
+}
+
+func TestZeroTierOnlineMockMatchesHandlebarsFieldNames(t *testing.T) {
+	mock := zerotierData{Snapshot: zerotier.Snapshot{Status: &zerotier.Status{
+		Address: "8056c2e21c", Online: true, Version: "1.14.2", TCPFallbackActive: true,
+	}}}
+	encoded, err := json.Marshal(mock)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, value := range []string{`"address":"8056c2e21c"`, `"online":true`, `"version":"1.14.2"`, `"tcpFallbackActive":true`} {
+		if !strings.Contains(string(encoded), value) {
+			t.Fatalf("mock status JSON is missing %s: %s", value, encoded)
+		}
+	}
+
+	templateSource, err := os.ReadFile("../../web/templates.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := string(templateSource)
+	for _, expression := range []string{
+		`{{#if Snapshot.Status.online}}`,
+		`{{Snapshot.Status.address}}`,
+		`{{Snapshot.Status.version}}`,
+		`{{#if Snapshot.Status.tcpFallbackActive}}`,
+	} {
+		if !strings.Contains(source, expression) {
+			t.Fatalf("ZeroTier template does not render mocked JSON field %s", expression)
+		}
+	}
+}
+
+func TestZeroTierLongPollReturnsNoDuplicatePayloadWhenCanceled(t *testing.T) {
+	h := &handler{zt: zerotier.New(t.TempDir())}
+	request := httptest.NewRequest("GET", "/zerotier/status?since=0", nil)
+	ctx, cancel := context.WithCancel(request.Context())
+	cancel()
+	request = request.WithContext(ctx)
+	recorder := httptest.NewRecorder()
+
+	h.GetZeroTierStatus(recorder, request)
+
+	if recorder.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, want 204", recorder.Code)
+	}
+	if recorder.Body.Len() != 0 {
+		t.Fatalf("unchanged long poll returned duplicate payload: %s", recorder.Body.String())
+	}
+	if got := recorder.Header().Get("HX-Trigger"); got != "zerotier-repoll" {
+		t.Fatalf("HX-Trigger = %q, want zerotier-repoll", got)
 	}
 }

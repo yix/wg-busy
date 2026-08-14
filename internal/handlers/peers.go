@@ -19,6 +19,9 @@ import (
 // peerRowData is the template data for a single peer row.
 type peerRowData struct {
 	Peer         models.Peer
+	ID           string
+	AllowedIPs   string
+	CreatedAt    time.Time
 	ExitNodeName string
 	Endpoint     string
 	TransferRx   string
@@ -80,7 +83,10 @@ func (h *handler) buildPeersListData() peersListData {
 }
 
 func (h *handler) buildPeerRow(peer models.Peer, exitNodeName string, stats wgstats.PeerStats) peerRowData {
-	row := peerRowData{Peer: peer, ExitNodeName: exitNodeName}
+	row := peerRowData{
+		Peer: peer, ID: peer.ID, AllowedIPs: peer.AllowedIPs, CreatedAt: peer.CreatedAt,
+		ExitNodeName: exitNodeName,
+	}
 	lastSeen := peer.LastSeen
 	if stats.PublicKey != "" {
 		row.HasStats = true

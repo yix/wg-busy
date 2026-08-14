@@ -26,12 +26,6 @@ func (h *handler) GetBGPStatsTab(w http.ResponseWriter, r *http.Request) {
 	writePageJSON(w, http.StatusOK, "bgp-tab", data, nil)
 }
 
-// GetBGPLiveStats handles GET /bgp/live-stats — the fragment htmx polls every
-// few seconds so session state and route counts update without a page reload.
-func (h *handler) GetBGPLiveStats(w http.ResponseWriter, r *http.Request) {
-	writePageJSON(w, http.StatusOK, "bgp-live-stats", bgp.GetBGPStats(), nil)
-}
-
 // bgpPeerFormData is the template data for the custom BGP peer create/edit form.
 type bgpPeerFormData struct {
 	IsNew bool

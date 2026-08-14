@@ -1,11 +1,13 @@
 package zerotier
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"sort"
 	"strconv"
@@ -46,7 +48,6 @@ type Snapshot struct {
 	Networks []NetworkStats
 	Peers    []Peer
 	Err      string
-	Uptime   time.Duration
 
 	// ServiceErr is the last error the daemon itself reported on its output. It
 	// survives across ticks: the daemon keeps running after failures like a
@@ -94,17 +95,18 @@ type Supervisor struct {
 	exitErr     error //nolint:unused // logged when the service dies
 	client      *Client
 	runningPort uint16
-	startedAt   time.Time
 	lastStart   time.Time
 
 	serviceErr string // last error line the daemon printed
 	hint       string // remediation for serviceErr, when we can infer one
 
-	snap  Snapshot
-	prev  map[string]counter // interface name -> previous sample
-	stop  chan struct{}
-	once  sync.Once
-	waitG sync.WaitGroup
+	snap     Snapshot
+	revision uint64
+	changed  chan struct{}
+	prev     map[string]counter // interface name -> previous sample
+	stop     chan struct{}
+	once     sync.Once
+	waitG    sync.WaitGroup
 }
 
 // New returns a supervisor for a ZeroTier home directory.
@@ -112,6 +114,7 @@ func New(homeDir string) *Supervisor {
 	return &Supervisor{
 		homeDir: homeDir,
 		prev:    make(map[string]counter),
+		changed: make(chan struct{}),
 		stop:    make(chan struct{}),
 	}
 }
@@ -205,17 +208,58 @@ func (s *Supervisor) setSnapshot(snap Snapshot) {
 			log.Printf("[ZT] recovered")
 		}
 	}
+	changed := !reflect.DeepEqual(s.snap, snap)
 	s.snap = snap
+	if changed {
+		s.revision++
+		if s.changed != nil {
+			close(s.changed)
+		}
+		s.changed = make(chan struct{})
+	}
 }
 
 // Snapshot returns the latest observed state for rendering.
 func (s *Supervisor) Snapshot() Snapshot {
+	snap, _ := s.SnapshotVersion()
+	return snap
+}
+
+// SnapshotVersion returns the latest state and its change revision.
+func (s *Supervisor) SnapshotVersion() (Snapshot, uint64) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	snap := s.snap
 	snap.Networks = append([]NetworkStats(nil), s.snap.Networks...)
 	snap.Peers = append([]Peer(nil), s.snap.Peers...)
-	return snap
+	return snap, s.revision
+}
+
+// WaitForChange blocks until the snapshot differs from revision or the request
+// ends. The timeout lets proxies recycle long-lived HTTP connections safely.
+func (s *Supervisor) WaitForChange(ctx context.Context, revision uint64, timeout time.Duration) bool {
+	s.mu.Lock()
+	if revision != s.revision {
+		s.mu.Unlock()
+		return true
+	}
+	changed := s.changed
+	if changed == nil {
+		changed = make(chan struct{})
+		s.changed = changed
+	}
+	s.mu.Unlock()
+
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+	select {
+	case <-changed:
+		return true
+	case <-ctx.Done():
+		return false
+	case <-timer.C:
+		return false
+	}
 }
 
 // Start begins the reconcile loop.
@@ -282,7 +326,6 @@ func (s *Supervisor) tick() {
 	s.mu.Lock()
 	client := s.client
 	needsReconcile := s.appliedG != gen
-	startedAt := s.startedAt
 	s.mu.Unlock()
 
 	if client == nil {
@@ -290,7 +333,7 @@ func (s *Supervisor) tick() {
 		return
 	}
 
-	snap := Snapshot{Enabled: true, Running: true, Uptime: time.Since(startedAt)}
+	snap := Snapshot{Enabled: true, Running: true}
 
 	status, err := client.Status()
 	if err != nil {
@@ -396,7 +439,6 @@ func (s *Supervisor) ensureRunning(desired models.ZeroTierConfig) error {
 	s.processDone = done
 	s.exited = false
 	s.runningPort = port
-	s.startedAt = time.Now()
 	s.client = NewClient(s.homeDir, port)
 	s.appliedG = 0
 	return nil
@@ -447,7 +489,6 @@ func (s *Supervisor) clearProcess() {
 	s.hint = ""
 	s.client = nil
 	s.runningPort = 0
-	s.startedAt = time.Time{}
 }
 
 // reconcileNetworks joins every configured network and leaves the rest.

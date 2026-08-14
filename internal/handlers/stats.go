@@ -3,9 +3,11 @@ package handlers
 import (
 	"fmt"
 	"net/http"
+	"time"
 
 	"github.com/skip2/go-qrcode"
 
+	"github.com/yix/wg-busy/internal/bgp"
 	"github.com/yix/wg-busy/internal/models"
 	"github.com/yix/wg-busy/internal/wgstats"
 	"github.com/yix/wg-busy/internal/wireguard"
@@ -20,13 +22,47 @@ type statsBarData struct {
 	CurrentRxPS  string
 	CurrentTxPS  string
 	SparklineSVG string
-	Peers        []peerRowData
+	Peers        []peerLiveData   `json:",omitempty"`
+	BGPStats     *models.BGPStats `json:",omitempty"`
 }
 
-// GetCombinedStats returns the stats bar data, including each peer row's live
-// stats for Handlebars to render as out-of-band swaps.
+// peerLiveData is deliberately smaller than peerRowData: the two-second peers
+// refresh must not resend keys, routing policy, and other form-only settings.
+type peerLiveData struct {
+	ID           string
+	AllowedIPs   string
+	CreatedAt    time.Time
+	TransferRx   string
+	TransferTx   string
+	CurrentRxPS  string
+	CurrentTxPS  string
+	LastSeen     string
+	LastSeenAt   string
+	SparklineSVG string
+	HasStats     bool
+}
+
+// GetCombinedStats returns the title stats plus only the live data needed by
+// the active tab. Peer and BGP updates are rendered as out-of-band swaps.
 func (h *handler) GetCombinedStats(w http.ResponseWriter, r *http.Request) {
-	data := statsBarData{Peers: h.buildPeersListData().Peers}
+	var data statsBarData
+	switch r.URL.Query().Get("kind") {
+	case "bgp":
+		data.BGPStats = bgp.GetBGPStats()
+	case "server", "zerotier":
+		// These tabs need only the interface summary in the title.
+	default:
+		// Keep peers as the default for the initial page and old clients.
+		for _, row := range h.buildPeersListData().Peers {
+			data.Peers = append(data.Peers, peerLiveData{
+				ID: row.ID, AllowedIPs: row.AllowedIPs, CreatedAt: row.CreatedAt,
+				TransferRx: row.TransferRx, TransferTx: row.TransferTx,
+				CurrentRxPS: row.CurrentRxPS, CurrentTxPS: row.CurrentTxPS,
+				LastSeen: row.LastSeen, LastSeenAt: row.LastSeenAt,
+				SparklineSVG: row.SparklineSVG, HasStats: row.HasStats,
+			})
+		}
+	}
 
 	if h.stats != nil {
 		iface := h.stats.GetInterfaceStats()

@@ -129,7 +129,7 @@ func NewRouter(store *config.Store, webFS fs.FS, stats *wgstats.Collector, zt *z
 		writePageJSON(w, http.StatusOK, "version", struct{ Version string }{Version: version}, nil)
 	})
 
-	// Stats bar fragment (includes OOB peer stats).
+	// Stats bar fragment (includes active-tab OOB stats selected by ?kind=).
 	mux.HandleFunc("GET /stats", h.GetCombinedStats)
 
 	// Peer fragment endpoints.
@@ -148,9 +148,8 @@ func NewRouter(store *config.Store, webFS fs.FS, stats *wgstats.Collector, zt *z
 	mux.HandleFunc("GET /server", h.GetServerConfig)
 	mux.HandleFunc("PUT /server", h.UpdateServerConfig)
 
-	// BGP stats fragment.
+	// BGP tab; live data is refreshed through the active-tab /stats request.
 	mux.HandleFunc("GET /bgp/stats", h.GetBGPStatsTab)
-	mux.HandleFunc("GET /bgp/live-stats", h.GetBGPLiveStats)
 
 	// Custom (non-WireGuard) BGP peer fragment endpoints.
 	mux.HandleFunc("GET /bgp/peers/new", h.GetBGPPeerForm)

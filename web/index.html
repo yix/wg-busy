@@ -32,22 +32,24 @@
             </button>
         </hgroup>
 
-        <div id="stats-bar" class="stats-bar" hx-get="stats" hx-trigger="templates-ready from:body, every 2s" hx-swap="innerHTML">
+        <input type="hidden" id="active-stats-kind" name="kind" value="peers">
+        <div id="stats-bar" class="stats-bar" hx-get="stats" hx-include="#active-stats-kind"
+             hx-trigger="templates-ready from:body, every 2s" hx-swap="innerHTML">
         </div>
 
         <div class="tabs" role="tablist">
-            <button role="tab" class="active" hx-get="peers" hx-target="#tab-content" hx-swap="innerHTML"
+            <button role="tab" class="active" data-stats-kind="peers" hx-get="peers" hx-target="#tab-content" hx-swap="innerHTML"
                 onclick="selectTab(this)">
                 Peers
             </button>
-            <button role="tab" hx-get="server" hx-target="#tab-content" hx-swap="innerHTML" onclick="selectTab(this)">
+            <button role="tab" data-stats-kind="server" hx-get="server" hx-target="#tab-content" hx-swap="innerHTML" onclick="selectTab(this)">
                 Server
             </button>
-            <button id="tab-bgp" role="tab" hx-get="bgp/stats" hx-target="#tab-content" hx-swap="innerHTML"
+            <button id="tab-bgp" role="tab" data-stats-kind="bgp" hx-get="bgp/stats" hx-target="#tab-content" hx-swap="innerHTML"
                 onclick="selectTab(this)">
                 BGP
             </button>
-            <button id="tab-zerotier" role="tab" hx-get="zerotier" hx-target="#tab-content" hx-swap="innerHTML"
+            <button id="tab-zerotier" role="tab" data-stats-kind="zerotier" hx-get="zerotier" hx-target="#tab-content" hx-swap="innerHTML"
                 onclick="selectTab(this)">
                 ZeroTier
             </button>
@@ -86,6 +88,7 @@
                 b.classList.remove('active');
             });
             btn.classList.add('active');
+            document.getElementById('active-stats-kind').value = btn.dataset.statsKind;
         }
 
         var renderPageResponse;
@@ -116,12 +119,14 @@
                 evt.detail.isError = false;
             }
 
-            // The BGP tab polls this fragment every 2s. Without this, an open
+            // The active-tab stats response refreshes this fragment every 2s.
+            // Without this, an open
             // "Received/Advertised routes" panel would fold itself shut (and any
             // "Show All Routes" click would un-expand) on every single tick.
-            if (evt.detail.target && evt.detail.target.id === 'bgp-live-stats') {
+            if (evt.detail.target && (evt.detail.target.id === 'bgp-live-stats' || evt.detail.target.id === 'stats-bar')) {
+                var bgpStats = document.getElementById('bgp-live-stats');
                 bgpRouteUIState = {};
-                evt.detail.target.querySelectorAll('details[data-route-key]').forEach(function (d) {
+                if (bgpStats) bgpStats.querySelectorAll('details[data-route-key]').forEach(function (d) {
                     bgpRouteUIState[d.dataset.routeKey] = { open: d.open, showAll: d.dataset.showAll === '1' };
                 });
             }
@@ -167,8 +172,9 @@
                 }
             }
 
-            if (evt.detail.target.id === 'bgp-live-stats') {
-                evt.detail.target.querySelectorAll('details[data-route-key]').forEach(function (d) {
+            if (evt.detail.target.id === 'bgp-live-stats' || evt.detail.target.id === 'stats-bar') {
+                var bgpStats = document.getElementById('bgp-live-stats');
+                if (bgpStats) bgpStats.querySelectorAll('details[data-route-key]').forEach(function (d) {
                     var state = bgpRouteUIState[d.dataset.routeKey];
                     if (!state) return;
                     if (state.open) d.open = true;

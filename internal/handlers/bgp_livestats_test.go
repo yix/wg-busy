@@ -10,8 +10,8 @@ import (
 )
 
 // TestBGPLiveStatsRouteKeysAreStableAcrossPolls verifies the data the
-// bgp-live-stats fragment relies on to survive the 2s poll: its JSON is stable,
-// and the Handlebars template derives route keys only from peer IP + direction.
+// bgp-live-stats fragment relies on to survive the active-tab stats refresh:
+// its JSON is stable, and route keys use only peer IP + direction.
 func TestBGPLiveStatsRouteKeysAreStableAcrossPolls(t *testing.T) {
 	routes := make([]models.BGPRoute, 12)
 	for i := range routes {

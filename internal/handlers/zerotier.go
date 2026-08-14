@@ -40,10 +40,10 @@ type zerotierData struct {
 	// Pending are networks in the config the daemon has not joined, so a network
 	// that never took effect is visible instead of just missing from the list.
 	Pending          []models.ZeroTierNetwork
-	Uptime           string
 	Success          string
 	Error            string
 	ValidationErrors models.ValidationErrors
+	Revision         uint64
 }
 
 func (h *handler) buildZeroTierData() zerotierData {
@@ -57,11 +57,9 @@ func (h *handler) buildZeroTierData() zerotierData {
 		return data
 	}
 
-	snap := h.zt.Snapshot()
+	snap, revision := h.zt.SnapshotVersion()
+	data.Revision = revision
 	data.Snapshot = snap
-	if snap.Running {
-		data.Uptime = wgstats.FormatDuration(snap.Uptime)
-	}
 
 	for _, n := range snap.Networks {
 		row := ztNetworkRow{
@@ -124,8 +122,21 @@ func (h *handler) GetZeroTierTab(w http.ResponseWriter, r *http.Request) {
 	writePageJSON(w, http.StatusOK, "zerotier-tab", data, nil)
 }
 
-// GetZeroTierStatus handles GET /zerotier/status — the fragment htmx polls.
+// GetZeroTierStatus waits for a changed cached snapshot. A timed-out request
+// returns no duplicate payload and tells htmx to open the next long poll.
 func (h *handler) GetZeroTierStatus(w http.ResponseWriter, r *http.Request) {
+	if h.zt != nil && r.URL.Query().Has("since") {
+		revision, err := strconv.ParseUint(r.URL.Query().Get("since"), 10, 64)
+		if err != nil {
+			writePageError(w, http.StatusBadRequest, fmt.Errorf("invalid ZeroTier revision"))
+			return
+		}
+		if !h.zt.WaitForChange(r.Context(), revision, 25*time.Second) {
+			w.Header().Set("HX-Trigger", "zerotier-repoll")
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+	}
 	data := h.buildZeroTierData()
 	writePageJSON(w, http.StatusOK, "zerotier-status", data, nil)
 }
@@ -250,6 +261,6 @@ func (h *handler) respondZeroTier(w http.ResponseWriter, r *http.Request, writeE
 }
 
 // reconcileGrace is how long a save waits for the supervisor to pick the change up.
-// ponytail: a sleep, not a completion signal — the tab re-polls every 2s anyway,
-// this only makes the immediate response look right.
+// ponytail: a sleep, not a completion signal — the tab's long poll refreshes
+// when the supervisor snapshot changes; this only makes the immediate response look right.
 const reconcileGrace = 300 * time.Millisecond
