@@ -1,12 +1,15 @@
 package handlers
 
 import (
+	"compress/gzip"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
 	"log"
+	"mime"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/yix/wg-busy/internal/config"
@@ -117,6 +120,94 @@ func logErrors(next http.Handler) http.Handler {
 	})
 }
 
+type gzipResponseWriter struct {
+	http.ResponseWriter
+	writer      *gzip.Writer
+	allow       bool
+	wroteHeader bool
+}
+
+func (w *gzipResponseWriter) WriteHeader(status int) {
+	if w.wroteHeader {
+		return
+	}
+	w.wroteHeader = true
+	if w.allow && status != http.StatusNoContent && status != http.StatusNotModified && isCompressible(w.Header().Get("Content-Type")) {
+		w.Header().Del("Content-Length")
+		w.Header().Set("Content-Encoding", "gzip")
+		w.writer = gzip.NewWriter(w.ResponseWriter)
+	}
+	w.ResponseWriter.WriteHeader(status)
+}
+
+func (w *gzipResponseWriter) Write(body []byte) (int, error) {
+	if !w.wroteHeader {
+		if w.Header().Get("Content-Type") == "" {
+			w.Header().Set("Content-Type", http.DetectContentType(body))
+		}
+		w.WriteHeader(http.StatusOK)
+	}
+	if w.writer != nil {
+		return w.writer.Write(body)
+	}
+	return w.ResponseWriter.Write(body)
+}
+
+func (w *gzipResponseWriter) close() {
+	if w.writer != nil {
+		_ = w.writer.Close()
+	}
+}
+
+func gzipResponses(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Add("Vary", "Accept-Encoding")
+		writer := &gzipResponseWriter{
+			ResponseWriter: w,
+			allow:          r.Method != http.MethodHead && r.Header.Get("Range") == "" && acceptsGzip(r.Header.Values("Accept-Encoding")),
+		}
+		defer writer.close()
+		next.ServeHTTP(writer, r)
+	})
+}
+
+func acceptsGzip(values []string) bool {
+	gzipQuality, wildcardQuality := -1.0, -1.0
+	for _, value := range values {
+		for _, item := range strings.Split(value, ",") {
+			name, params, err := mime.ParseMediaType(strings.TrimSpace(item))
+			if err != nil {
+				continue
+			}
+			quality := 1.0
+			if raw, ok := params["q"]; ok {
+				quality, err = strconv.ParseFloat(raw, 64)
+				if err != nil {
+					continue
+				}
+			}
+			switch {
+			case strings.EqualFold(name, "gzip"):
+				gzipQuality = quality
+			case name == "*":
+				wildcardQuality = quality
+			}
+		}
+	}
+	if gzipQuality >= 0 {
+		return gzipQuality > 0
+	}
+	return wildcardQuality > 0
+}
+
+func isCompressible(contentType string) bool {
+	mediaType, _, err := mime.ParseMediaType(contentType)
+	if err != nil {
+		return false
+	}
+	return strings.HasPrefix(mediaType, "text/") || mediaType == "application/json" || mediaType == "application/javascript" || mediaType == "application/xml" || mediaType == "image/svg+xml"
+}
+
 // NewRouter creates the HTTP mux with all routes registered.
 func NewRouter(store *config.Store, webFS fs.FS, stats *wgstats.Collector, zt *zerotier.Supervisor, version string) http.Handler {
 	h := &handler{store: store, stats: stats, zt: zt}
@@ -173,5 +264,5 @@ func NewRouter(store *config.Store, webFS fs.FS, stats *wgstats.Collector, zt *z
 	mux.HandleFunc("POST /api/peers/{id}/regenerate-keys", h.RegeneratePeerKeys)
 	mux.HandleFunc("POST /api/zerotier/restart", h.RestartZeroTier)
 
-	return logErrors(mux)
+	return gzipResponses(logErrors(mux))
 }

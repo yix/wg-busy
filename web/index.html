@@ -34,7 +34,8 @@
 
         <input type="hidden" id="active-stats-kind" name="kind" value="peers">
         <div id="stats-bar" class="stats-bar" hx-get="stats" hx-include="#active-stats-kind"
-             hx-trigger="templates-ready from:body, every 2s" hx-swap="innerHTML">
+             hx-trigger="templates-ready from:body, every 2s [document.visibilityState === 'visible'], visibilitychange from:document [document.visibilityState === 'visible']"
+             hx-swap="innerHTML">
         </div>
 
         <div class="tabs" role="tablist">

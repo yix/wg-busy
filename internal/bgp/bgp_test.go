@@ -5,6 +5,7 @@ import (
 	"net"
 	"slices"
 	"testing"
+	"time"
 
 	bnet "github.com/bio-routing/bio-rd/net"
 	"github.com/bio-routing/bio-rd/protocols/kernel"
@@ -36,6 +37,31 @@ func TestServerStateIncludesEveryRestartSensitiveSetting(t *testing.T) {
 	}
 	if got := stateFor(models.ServerConfig{BGPListenPort: 179}, 1).listenAddress; got != "::" {
 		t.Fatalf("default listen address = %q, want ::", got)
+	}
+}
+
+func TestGetBGPStatsReusesSnapshotWithinPollingInterval(t *testing.T) {
+	mu.Lock()
+	originalActive, originalCache := active, statsCache
+	active = nil
+	statsCache = bgpStatsCache{}
+	mu.Unlock()
+	t.Cleanup(func() {
+		mu.Lock()
+		active, statsCache = originalActive, originalCache
+		mu.Unlock()
+	})
+
+	first := GetBGPStats()
+	second := GetBGPStats()
+	if first != second {
+		t.Fatal("two calls within one polling interval rebuilt the BGP snapshot")
+	}
+	mu.Lock()
+	statsCache.until = time.Time{}
+	mu.Unlock()
+	if third := GetBGPStats(); third == second {
+		t.Fatal("expired BGP snapshot was reused")
 	}
 }
 

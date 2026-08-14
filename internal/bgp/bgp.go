@@ -140,10 +140,15 @@ func Configure(cfg *models.AppConfig) error {
 			return err
 		}
 		active = candidate
+		invalidateStatsCacheLocked()
 		return nil
 	}
 
-	return applyRuntimeConfig(active, cfg)
+	if err := applyRuntimeConfig(active, cfg); err != nil {
+		return err
+	}
+	invalidateStatsCacheLocked()
+	return nil
 }
 
 func stateFor(cfg models.ServerConfig, routerID uint32) bgpServerState {
@@ -434,6 +439,7 @@ func startRuntime(cfg *models.AppConfig, state bgpServerState) (*bgpRuntime, err
 }
 
 func stopLocked() error {
+	invalidateStatsCacheLocked()
 	if active == nil {
 		return nil
 	}

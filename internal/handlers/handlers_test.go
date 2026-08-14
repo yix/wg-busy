@@ -1,9 +1,11 @@
 package handlers
 
 import (
+	"compress/gzip"
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -90,6 +92,81 @@ func TestVersionEndpointReturnsBuildVersion(t *testing.T) {
 	}
 	if response.Template != "version" || response.Data.Version != "v0.0.1" {
 		t.Fatalf("version response = %#v", response)
+	}
+}
+
+func TestRouterCompressesJSONWhenGzipIsAccepted(t *testing.T) {
+	router := NewRouter(nil, fstest.MapFS{"index.html": {Data: []byte("ok")}}, nil, nil, "v0.0.1")
+	request := httptest.NewRequest("GET", "/version", nil)
+	request.Header.Set("Accept-Encoding", "gzip")
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, request)
+
+	if got := recorder.Header().Get("Content-Encoding"); got != "gzip" {
+		t.Fatalf("Content-Encoding = %q, want gzip", got)
+	}
+	if got := recorder.Header().Get("Vary"); !strings.Contains(got, "Accept-Encoding") {
+		t.Fatalf("Vary = %q, want Accept-Encoding", got)
+	}
+	reader, err := gzip.NewReader(recorder.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, err := io.ReadAll(reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := reader.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(body), `"Version":"v0.0.1"`) {
+		t.Fatalf("decoded response = %s", body)
+	}
+}
+
+func TestRouterHonorsDisabledGzipAndEmptyResponses(t *testing.T) {
+	handler := gzipResponses(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/empty":
+			w.WriteHeader(http.StatusNoContent)
+			return
+		case "/image":
+			w.Header().Set("Content-Type", "image/png")
+			_, _ = w.Write([]byte("png"))
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	}))
+
+	for _, test := range []struct{ path, acceptEncoding string }{
+		{path: "/json", acceptEncoding: "gzip;q=0, *;q=1"},
+		{path: "/empty", acceptEncoding: "gzip"},
+		{path: "/image", acceptEncoding: "gzip"},
+	} {
+		request := httptest.NewRequest("GET", test.path, nil)
+		request.Header.Set("Accept-Encoding", test.acceptEncoding)
+		recorder := httptest.NewRecorder()
+		handler.ServeHTTP(recorder, request)
+		if got := recorder.Header().Get("Content-Encoding"); got != "" {
+			t.Fatalf("%s Content-Encoding = %q, want empty", test.path, got)
+		}
+	}
+}
+
+func TestStatsPollingPausesWhilePageIsHidden(t *testing.T) {
+	source, err := os.ReadFile("../../web/index.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := string(source)
+	for _, trigger := range []string{
+		`every 2s [document.visibilityState === 'visible']`,
+		`visibilitychange from:document [document.visibilityState === 'visible']`,
+	} {
+		if !strings.Contains(body, trigger) {
+			t.Fatalf("stats trigger is missing %q", trigger)
+		}
 	}
 }
 

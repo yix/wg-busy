@@ -20,6 +20,22 @@ var advertisedRoutesWatcher struct {
 	fn   func()
 }
 
+const statsCacheTTL = 2 * time.Second
+
+type bgpStatsCache struct {
+	runtime *bgpRuntime
+	until   time.Time
+	value   *models.BGPStats
+}
+
+// The UI polls on the same interval; sharing one immutable snapshot prevents
+// every connected browser from walking and sorting the complete RIB again.
+var statsCache bgpStatsCache
+
+func invalidateStatsCacheLocked() {
+	statsCache = bgpStatsCache{}
+}
+
 // AdvertisedRoutesByPeer returns the live prefixes in each peer's Adj-RIB-Out.
 func AdvertisedRoutesByPeer() map[string][]string {
 	mu.Lock()
@@ -122,7 +138,18 @@ func bgpStateToString(state uint8) string {
 func GetBGPStats() *models.BGPStats {
 	mu.Lock()
 	defer mu.Unlock()
+	now := time.Now()
+	if statsCache.value != nil && statsCache.runtime == active && now.Before(statsCache.until) {
+		return statsCache.value
+	}
 
+	statsCache.runtime = active
+	statsCache.until = now.Add(statsCacheTTL)
+	statsCache.value = collectBGPStatsLocked()
+	return statsCache.value
+}
+
+func collectBGPStatsLocked() *models.BGPStats {
 	res := &models.BGPStats{
 		Running: false,
 		Peers:   make([]models.BGPPeerStats, 0),
