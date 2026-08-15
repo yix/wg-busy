@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -145,6 +146,9 @@ func TestWriteReportsRestartPendingUntilMarkedApplied(t *testing.T) {
 	})
 	if !errors.Is(err, wireguard.ErrRestartNeeded) {
 		t.Fatalf("address save error = %v, want restart needed", err)
+	}
+	if !strings.Contains(err.Error(), "Address changed") {
+		t.Fatalf("address save error does not explain the restart: %v", err)
 	}
 	if err := s.Write(func(*models.AppConfig) error { return nil }); !errors.Is(err, wireguard.ErrRestartNeeded) {
 		t.Fatalf("subsequent save error = %v, want pending restart", err)

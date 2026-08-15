@@ -26,7 +26,7 @@ func TestRenderApplyWarningKeepsPersistedMutationOnSuccessPath(t *testing.T) {
 	if !ok {
 		t.Fatal("ApplyError was not recognized")
 	}
-	if toast.Kind != "error" || !strings.Contains(toast.Message, "configuration saved but live apply failed") {
+	if toast.Kind != "error" || !strings.Contains(toast.Message, "configuration saved, but live apply did not complete") {
 		t.Fatalf("warning does not distinguish persistence from apply failure: %#v", toast)
 	}
 	if _, ok := applyWarning(errors.New("not persisted")); ok {

@@ -107,19 +107,79 @@ func TestRestartWGConfigReportsDownFailure(t *testing.T) {
 	}
 }
 
-func TestServerRequiresRestart(t *testing.T) {
+func TestRestartWGConfigReportsUpCommandOutput(t *testing.T) {
+	original := runCommand
+	t.Cleanup(func() { runCommand = original })
+	runCommand = func(name string, args []string, _ []byte) ([]byte, error) {
+		if name == "ip" {
+			return nil, errors.New("missing")
+		}
+		return []byte("iptables: Bad rule (does a matching rule exist?)"), errors.New("exit 1")
+	}
+
+	err := RestartWGConfig("/custom/wg0.conf")
+	if err == nil || !strings.Contains(err.Error(), "iptables: Bad rule") {
+		t.Fatalf("RestartWGConfig error = %v", err)
+	}
+}
+
+func TestServerRestartReason(t *testing.T) {
 	base := models.ServerConfig{Address: "10.0.0.1/24", ListenPort: 51820}
-	if ServerRequiresRestart(base, base) {
-		t.Fatal("unchanged server requires restart")
+	if reason := ServerRestartReason(base, base); reason != nil {
+		t.Fatalf("unchanged server requires restart: %v", reason)
 	}
 	listenChanged := base
 	listenChanged.ListenPort++
-	if ServerRequiresRestart(base, listenChanged) {
-		t.Fatal("syncconf-compatible listen port change requires restart")
+	if reason := ServerRestartReason(base, listenChanged); reason != nil {
+		t.Fatalf("syncconf-compatible listen port change requires restart: %v", reason)
 	}
 	addressChanged := base
 	addressChanged.Address = "10.1.0.1/24"
-	if !ServerRequiresRestart(base, addressChanged) {
+	if reason := ServerRestartReason(base, addressChanged); reason == nil {
 		t.Fatal("address change did not require restart")
+	}
+
+	hooksChanged := base
+	hooksChanged.PostUp = "iptables -A FORWARD -i wg0 -j ACCEPT"
+	reason := ServerRestartReason(base, hooksChanged)
+	if !errors.Is(reason, ErrRestartNeeded) || !strings.Contains(reason.Error(), "PostUp changed") {
+		t.Fatalf("PostUp restart reason = %v", reason)
+	}
+
+	crlf, lf := base, base
+	crlf.PostUp = "iptables up-1\r\niptables up-2\r\n"
+	lf.PostUp = "iptables up-1\niptables up-2"
+	if reason := ServerRestartReason(crlf, lf); reason != nil {
+		t.Fatalf("newline-only hook difference requires restart: %v", reason)
+	}
+}
+
+func TestRenderServerConfigSplitsMultilineHooks(t *testing.T) {
+	cfg := models.AppConfig{Server: models.ServerConfig{
+		PrivateKey: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+		ListenPort: 51820,
+		Address:    "10.0.0.1/24",
+		PreUp:      "echo pre-1\r\n\n echo pre-2 ",
+		PostUp:     "iptables up-1\niptables up-2",
+		PostDown:   "iptables down-1\niptables down-2",
+		PreDown:    "echo down-1\necho down-2",
+	}}
+
+	got, err := RenderServerConfig(cfg, []string{"generated up"}, []string{"generated down"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "PreUp = echo pre-1\n" +
+		"PreUp = echo pre-2\n" +
+		"PostUp = iptables up-1\n" +
+		"PostUp = iptables up-2\n" +
+		"PostUp = generated up\n" +
+		"PostDown = generated down\n" +
+		"PostDown = iptables down-1\n" +
+		"PostDown = iptables down-2\n" +
+		"PreDown = echo down-1\n" +
+		"PreDown = echo down-2\n"
+	if !strings.Contains(got, want) {
+		t.Fatalf("rendered hooks:\n%s\nwant contiguous block:\n%s", got, want)
 	}
 }

@@ -55,7 +55,7 @@ type Store struct {
 type ApplyError struct{ Err error }
 
 func (e *ApplyError) Error() string {
-	return "configuration saved but live apply failed: " + e.Err.Error()
+	return "configuration saved, but live apply did not complete: " + e.Err.Error()
 }
 func (e *ApplyError) Unwrap() error { return e.Err }
 
@@ -199,9 +199,11 @@ func (s *Store) Write(fn func(cfg *models.AppConfig) error) error {
 		s.config = backup
 		return err
 	}
+	var restartErr error
 	if s.wgHasApplied {
-		s.wgRestartPending = wireguard.ServerRequiresRestart(s.wgAppliedServer, s.config.Server)
-	} else if wireguard.ServerRequiresRestart(backup.Server, s.config.Server) {
+		restartErr = wireguard.ServerRestartReason(s.wgAppliedServer, s.config.Server)
+		s.wgRestartPending = restartErr != nil
+	} else if restartErr = wireguard.ServerRestartReason(backup.Server, s.config.Server); restartErr != nil {
 		s.wgRestartPending = true
 	}
 	if errs := models.ValidateConfig(s.config); len(errs) > 0 {
@@ -234,7 +236,10 @@ func (s *Store) Write(fn func(cfg *models.AppConfig) error) error {
 	} else if !running {
 		applyErrs = append(applyErrs, wireguard.ErrInterfaceDown)
 	} else if s.wgRestartPending {
-		applyErrs = append(applyErrs, wireguard.ErrRestartNeeded)
+		if restartErr == nil {
+			restartErr = wireguard.ErrRestartNeeded
+		}
+		applyErrs = append(applyErrs, restartErr)
 	} else {
 		if err := routing.Reconcile(s.routingState, s.routingNets, s.routingBGP, s.config, currentNets, currentBGP); err != nil {
 			applyErrs = append(applyErrs, err)

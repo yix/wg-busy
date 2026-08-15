@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os/exec"
+	"slices"
 	"strings"
 	"text/template"
 
@@ -15,7 +16,7 @@ import (
 
 var (
 	ErrInterfaceDown = errors.New("WireGuard interface wg0 is not running")
-	ErrRestartNeeded = errors.New("WireGuard server settings were saved and require Apply Config")
+	ErrRestartNeeded = errors.New("WireGuard requires a restart via Apply Config")
 )
 
 var runCommand = func(name string, args []string, stdin []byte) ([]byte, error) {
@@ -64,19 +65,35 @@ func RestartWGConfig(configPath string) error {
 	return nil
 }
 
-// ServerRequiresRestart reports whether wg-quick-owned interface state changed.
-// These fields are deliberately absent from `wg-quick strip`, so syncconf can
-// never make them live.
-func ServerRequiresRestart(previous, next models.ServerConfig) bool {
-	return previous.Address != next.Address ||
-		previous.DNS != next.DNS ||
-		previous.MTU != next.MTU ||
-		previous.Table != next.Table ||
-		previous.FwMark != next.FwMark ||
-		previous.PreUp != next.PreUp ||
-		previous.PostUp != next.PostUp ||
-		previous.PreDown != next.PreDown ||
-		previous.PostDown != next.PostDown
+// ServerRestartReason names the wg-quick-owned fields that prevent syncconf
+// from completing a live reload. These fields are deliberately absent from
+// `wg-quick strip`, so syncconf can never make them live.
+func ServerRestartReason(previous, next models.ServerConfig) error {
+	var fields []string
+	for _, field := range []struct {
+		name    string
+		changed bool
+	}{
+		{"Address", previous.Address != next.Address},
+		{"DNS", previous.DNS != next.DNS},
+		{"MTU", previous.MTU != next.MTU},
+		{"Table", previous.Table != next.Table},
+		{"FwMark", previous.FwMark != next.FwMark},
+		// Hooks compare as rendered: a newline-only edit produces an identical
+		// wg0.conf and must not cost the user every live tunnel.
+		{"PreUp", !slices.Equal(hookLines(previous.PreUp), hookLines(next.PreUp))},
+		{"PostUp", !slices.Equal(hookLines(previous.PostUp), hookLines(next.PostUp))},
+		{"PreDown", !slices.Equal(hookLines(previous.PreDown), hookLines(next.PreDown))},
+		{"PostDown", !slices.Equal(hookLines(previous.PostDown), hookLines(next.PostDown))},
+	} {
+		if field.changed {
+			fields = append(fields, field.name)
+		}
+	}
+	if len(fields) == 0 {
+		return nil
+	}
+	return fmt.Errorf("%w because %s changed; wg syncconf cannot apply wg-quick-managed settings", ErrRestartNeeded, strings.Join(fields, ", "))
 }
 
 // GenerateKeyPair generates a WireGuard private key and derives the public key.
@@ -120,7 +137,7 @@ type peerConfData struct {
 	EffectiveAllowedIPs string
 }
 
-var serverConfTmpl = template.Must(template.New("server").Parse(`[Interface]
+var serverConfTmpl = template.Must(template.New("server").Funcs(template.FuncMap{"hookLines": hookLines}).Parse(`[Interface]
 PrivateKey = {{ .Server.PrivateKey }}
 ListenPort = {{ .Server.ListenPort }}
 Address = {{ .Server.Address }}
@@ -136,11 +153,11 @@ Table = {{ .Server.Table }}
 {{- if .Server.FwMark }}
 FwMark = {{ .Server.FwMark }}
 {{- end }}
-{{- if .Server.PreUp }}
-PreUp = {{ .Server.PreUp }}
+{{- range hookLines .Server.PreUp }}
+PreUp = {{ . }}
 {{- end }}
-{{- if .Server.PostUp }}
-PostUp = {{ .Server.PostUp }}
+{{- range hookLines .Server.PostUp }}
+PostUp = {{ . }}
 {{- end }}
 {{- range .PostUpCommands }}
 PostUp = {{ . }}
@@ -148,11 +165,11 @@ PostUp = {{ . }}
 {{- range .PostDownCommands }}
 PostDown = {{ . }}
 {{- end }}
-{{- if .Server.PostDown }}
-PostDown = {{ .Server.PostDown }}
+{{- range hookLines .Server.PostDown }}
+PostDown = {{ . }}
 {{- end }}
-{{- if .Server.PreDown }}
-PreDown = {{ .Server.PreDown }}
+{{- range hookLines .Server.PreDown }}
+PreDown = {{ . }}
 {{- end }}
 {{ range .EnabledPeers }}
 [Peer]
@@ -238,6 +255,16 @@ Endpoint = {{ .Endpoint }}
 PersistentKeepalive = {{ .Peer.PersistentKeepalive }}
 {{- end }}
 `))
+
+func hookLines(value string) []string {
+	var lines []string
+	for line := range strings.SplitSeq(value, "\n") {
+		if line = strings.TrimSpace(line); line != "" {
+			lines = append(lines, line)
+		}
+	}
+	return lines
+}
 
 // RenderClientConfig produces a client .conf file for a specific peer.
 func RenderClientConfig(server models.ServerConfig, peer models.Peer) (string, error) {

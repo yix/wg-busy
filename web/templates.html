@@ -503,19 +503,19 @@
             </div>
             <label>
                 PreUp
-                <textarea name="preUp" rows="2" placeholder="Script to run before interface up">{{Server.PreUp}}</textarea>
+                <textarea name="preUp" rows="4" placeholder="One command per line, before interface up">{{Server.PreUp}}</textarea>
             </label>
             <label>
                 PostUp
-                <textarea name="postUp" rows="2" placeholder="iptables -A FORWARD...">{{Server.PostUp}}</textarea>
+                <textarea name="postUp" rows="4" placeholder="One command per line, e.g. iptables -A FORWARD...">{{Server.PostUp}}</textarea>
             </label>
             <label>
                 PreDown
-                <textarea name="preDown" rows="2" placeholder="Script to run before interface down">{{Server.PreDown}}</textarea>
+                <textarea name="preDown" rows="4" placeholder="One command per line, before interface down">{{Server.PreDown}}</textarea>
             </label>
             <label>
                 PostDown
-                <textarea name="postDown" rows="2" placeholder="iptables -D FORWARD...">{{Server.PostDown}}</textarea>
+                <textarea name="postDown" rows="4" placeholder="One command per line, e.g. iptables -D FORWARD...">{{Server.PostDown}}</textarea>
             </label>
         </details>
 
