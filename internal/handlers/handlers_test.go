@@ -34,6 +34,76 @@ func TestRenderApplyWarningKeepsPersistedMutationOnSuccessPath(t *testing.T) {
 	}
 }
 
+func TestServerAndBGPFormsUpdateOnlyTheirOwnSettings(t *testing.T) {
+	dir := t.TempDir()
+	configPath := dir + "/config.yaml"
+	if err := os.WriteFile(configPath, []byte(`server:
+  privateKey: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
+  listenPort: 51820
+  address: 10.0.0.1/24
+  bgpEnabled: true
+  bgpListenAddress: 10.0.0.1
+  bgpListenPort: 179
+  bgpAsn: 64512
+`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	store, err := config.Load(configPath, dir+"/wg0.conf")
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := &handler{store: store}
+
+	serverRequest := httptest.NewRequest("PUT", "/server", strings.NewReader("listenPort=51821&address=10.0.0.1%2F24"))
+	serverRequest.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	h.UpdateServerConfig(httptest.NewRecorder(), serverRequest)
+
+	store.Read(func(cfg *models.AppConfig) {
+		if !cfg.Server.BGPEnabled || cfg.Server.BGPASN != 64512 || cfg.Server.BGPListenAddress != "10.0.0.1" || cfg.Server.BGPListenPort != 179 {
+			t.Errorf("server form changed BGP settings: %#v", cfg.Server)
+		}
+	})
+
+	bgpRequest := httptest.NewRequest("PUT", "/bgp/server", strings.NewReader("bgpEnabled=on&bgpAsn=65001&bgpListenAddress=10.0.0.2&bgpListenPort=1179"))
+	bgpRequest.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	h.UpdateBGPServerConfig(httptest.NewRecorder(), bgpRequest)
+
+	store.Read(func(cfg *models.AppConfig) {
+		if cfg.Server.ListenPort != 51821 || cfg.Server.Address != "10.0.0.1/24" {
+			t.Errorf("BGP form changed WireGuard settings: %#v", cfg.Server)
+		}
+		if !cfg.Server.BGPEnabled || cfg.Server.BGPASN != 65001 || cfg.Server.BGPListenAddress != "10.0.0.2" || cfg.Server.BGPListenPort != 1179 {
+			t.Errorf("BGP settings were not updated: %#v", cfg.Server)
+		}
+	})
+}
+
+func TestBGPServerConfigurationLivesInBGPTab(t *testing.T) {
+	templateSource, err := os.ReadFile("../../web/templates.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := string(templateSource)
+	serverStart := strings.Index(source, `id="server-config-template"`)
+	bgpStart := strings.Index(source, `id="bgp-tab-template"`)
+	if serverStart < 0 || bgpStart < 0 {
+		t.Fatal("server or BGP template not found")
+	}
+	serverEnd := strings.Index(source[serverStart:], "</script>")
+	bgpEnd := strings.Index(source[bgpStart:], "</script>")
+	if serverEnd < 0 || bgpEnd < 0 {
+		t.Fatal("server or BGP template is not closed")
+	}
+	serverTemplate := source[serverStart : serverStart+serverEnd]
+	bgpTemplate := source[bgpStart : bgpStart+bgpEnd]
+	if strings.Contains(serverTemplate, "BGP Server Configuration") || strings.Contains(serverTemplate, `name="bgpEnabled"`) {
+		t.Fatal("BGP server controls remain in the Server tab")
+	}
+	if !strings.Contains(bgpTemplate, "BGP Server Configuration") || !strings.Contains(bgpTemplate, `hx-put="bgp/server"`) {
+		t.Fatal("BGP tab does not contain the BGP server form")
+	}
+}
+
 func TestNewDualRolePeerGetsDistinctRoutingTables(t *testing.T) {
 	peer := models.Peer{IsExitNode: true, PolicyRoutes: []string{"10.5.5.0/24 via 10.0.0.2"}}
 	assignNewPeerRoutingTables(&peer, nil)

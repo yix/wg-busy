@@ -241,6 +241,7 @@ func NewRouter(store *config.Store, webFS fs.FS, stats *wgstats.Collector, zt *z
 
 	// BGP tab; live data is refreshed through the active-tab /stats request.
 	mux.HandleFunc("GET /bgp/stats", h.GetBGPStatsTab)
+	mux.HandleFunc("PUT /bgp/server", h.UpdateBGPServerConfig)
 
 	// Custom (non-WireGuard) BGP peer fragment endpoints.
 	mux.HandleFunc("GET /bgp/peers/new", h.GetBGPPeerForm)

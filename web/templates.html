@@ -440,31 +440,6 @@
             </label>
         </div>
 
-        <fieldset>
-            <legend>BGP Server Configuration</legend>
-            <label>
-                <input type="checkbox" name="bgpEnabled" {{#if Server.BGPEnabled}}checked{{/if}}>
-                Enable BGP Overlay
-            </label>
-            <div class="grid">
-                <label>
-                    BGP ASN
-                    <input type="number" name="bgpAsn" value="{{#if Server.BGPASN}}{{Server.BGPASN}}{{else}}64512{{/if}}" placeholder="64512" {{#if (hasField ValidationErrors "bgpAsn")}}aria-invalid="true"{{/if}}>
-                    {{#each ValidationErrors}}{{#if (eq Field "bgpAsn")}}<small class="field-error">{{Message}}</small>{{/if}}{{/each}}
-                </label>
-                <label>
-                    BGP Listen Address
-                    <input type="text" name="bgpListenAddress" value="{{Server.BGPListenAddress}}" placeholder="(Optional, wg0 IP)" {{#if (hasField ValidationErrors "bgpListenAddress")}}aria-invalid="true"{{/if}}>
-                    {{#each ValidationErrors}}{{#if (eq Field "bgpListenAddress")}}<small class="field-error">{{Message}}</small>{{/if}}{{/each}}
-                </label>
-                <label>
-                    BGP Listen Port
-                    <input type="number" name="bgpListenPort" value="{{#if Server.BGPListenPort}}{{Server.BGPListenPort}}{{else}}179{{/if}}" placeholder="179" {{#if (hasField ValidationErrors "bgpListenPort")}}aria-invalid="true"{{/if}}>
-                    {{#each ValidationErrors}}{{#if (eq Field "bgpListenPort")}}<small class="field-error">{{Message}}</small>{{/if}}{{/each}}
-                </label>
-            </div>
-        </fieldset>
-
         <label>
             Public Endpoint
             <input type="text" name="endpoint" value="{{Server.Endpoint}}"
@@ -918,8 +893,40 @@
 <script type="text/x-handlebars-template" id="bgp-tab-template">
 <div id="bgp-stats">
     <div class="header-row">
-        <h2>BGP Statistics</h2>
+        <h2>BGP</h2>
     </div>
+
+    {{#if Success}}<div class="toast toast-success" role="alert">{{Success}}</div>{{/if}}
+    {{#if Error}}<div class="toast toast-error" role="alert">{{Error}}</div>{{/if}}
+    {{> error-summary ValidationErrors}}
+
+    <form hx-put="bgp/server" hx-target="#tab-content" hx-swap="innerHTML">
+        <fieldset>
+            <legend>BGP Server Configuration</legend>
+            <label>
+                <input type="checkbox" name="bgpEnabled" {{#if BGPServer.Enabled}}checked{{/if}}>
+                Enable BGP Server
+            </label>
+            <div class="grid">
+                <label>
+                    Local ASN
+                    <input type="number" name="bgpAsn" value="{{#if BGPServer.ASN}}{{BGPServer.ASN}}{{else}}64512{{/if}}" placeholder="64512" {{#if (hasField ValidationErrors "bgpAsn")}}aria-invalid="true"{{/if}}>
+                    {{#each ValidationErrors}}{{#if (eq Field "bgpAsn")}}<small class="field-error">{{Message}}</small>{{/if}}{{/each}}
+                </label>
+                <label>
+                    Listen Address
+                    <input type="text" name="bgpListenAddress" value="{{BGPServer.ListenAddress}}" placeholder="Optional; defaults to all WireGuard and ZeroTier addresses" {{#if (hasField ValidationErrors "bgpListenAddress")}}aria-invalid="true"{{/if}}>
+                    {{#each ValidationErrors}}{{#if (eq Field "bgpListenAddress")}}<small class="field-error">{{Message}}</small>{{/if}}{{/each}}
+                </label>
+                <label>
+                    Listen Port
+                    <input type="number" name="bgpListenPort" value="{{#if BGPServer.ListenPort}}{{BGPServer.ListenPort}}{{else}}179{{/if}}" min="1" max="65535" placeholder="179" {{#if (hasField ValidationErrors "bgpListenPort")}}aria-invalid="true"{{/if}}>
+                    {{#each ValidationErrors}}{{#if (eq Field "bgpListenPort")}}<small class="field-error">{{Message}}</small>{{/if}}{{/each}}
+                </label>
+            </div>
+        </fieldset>
+        <button type="submit" class="btn btn-primary">Save BGP Settings</button>
+    </form>
 
     {{> bgp-custom-peers CustomPeers}}
 
@@ -932,7 +939,7 @@
 <script type="text/x-handlebars-template" id="bgp-live-stats-template">
     {{#unless running}}
     <article class="toast toast-error">
-        BGP Service is currently disabled or not started. Enable it in the Server Configuration.
+        BGP Service is currently disabled or not started. Enable it in the BGP Server Configuration above.
     </article>
     {{else}}
     <div class="grid" style="margin-bottom: 2rem;">

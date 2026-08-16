@@ -3,6 +3,7 @@ package handlers
 import (
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -13,16 +14,83 @@ import (
 // bgpTabData is the template data for the BGP tab: live session stats plus the
 // configured standalone (non-WireGuard) BGP peers.
 type bgpTabData struct {
-	BGPStats    *models.BGPStats
-	CustomPeers bgpCustomPeersData
+	BGPServer        bgpServerConfigData
+	BGPStats         *models.BGPStats
+	CustomPeers      bgpCustomPeersData
+	Success          string
+	Error            string
+	ValidationErrors models.ValidationErrors
+}
+
+type bgpServerConfigData struct {
+	Enabled       bool
+	ASN           uint32
+	ListenAddress string
+	ListenPort    uint16
 }
 
 // GetBGPStatsTab returns the BGP statistics data.
 func (h *handler) GetBGPStatsTab(w http.ResponseWriter, r *http.Request) {
+	writePageJSON(w, http.StatusOK, "bgp-tab", h.buildBGPTabData(), nil)
+}
+
+func (h *handler) buildBGPTabData() bgpTabData {
 	data := bgpTabData{BGPStats: bgp.GetBGPStats()}
 	h.store.Read(func(cfg *models.AppConfig) {
+		data.BGPServer = bgpServerConfigData{
+			Enabled:       cfg.Server.BGPEnabled,
+			ASN:           cfg.Server.BGPASN,
+			ListenAddress: cfg.Server.BGPListenAddress,
+			ListenPort:    cfg.Server.BGPListenPort,
+		}
 		data.CustomPeers.Peers = cfg.BGPPeers
 	})
+	return data
+}
+
+// UpdateBGPServerConfig updates only the global BGP listener settings.
+func (h *handler) UpdateBGPServerConfig(w http.ResponseWriter, r *http.Request) {
+	if err := r.ParseForm(); err != nil {
+		writePageError(w, http.StatusBadRequest, fmt.Errorf("bad request"))
+		return
+	}
+
+	port, _ := strconv.ParseUint(r.FormValue("bgpListenPort"), 10, 16)
+	asn, _ := strconv.ParseUint(r.FormValue("bgpAsn"), 10, 32)
+	submitted := bgpServerConfigData{
+		Enabled:       r.FormValue("bgpEnabled") == "on",
+		ASN:           uint32(asn),
+		ListenAddress: strings.TrimSpace(r.FormValue("bgpListenAddress")),
+		ListenPort:    uint16(port),
+	}
+
+	writeErr := h.store.Write(func(cfg *models.AppConfig) error {
+		cfg.Server.BGPEnabled = submitted.Enabled
+		cfg.Server.BGPASN = submitted.ASN
+		cfg.Server.BGPListenAddress = submitted.ListenAddress
+		cfg.Server.BGPListenPort = submitted.ListenPort
+		return nil
+	})
+
+	data := h.buildBGPTabData()
+	if writeErr != nil {
+		logRejected(r, writeErr)
+		if ve, ok := writeErr.(models.ValidationErrors); ok {
+			data.BGPServer = submitted
+			data.ValidationErrors = ve
+			writePageJSON(w, http.StatusUnprocessableEntity, "bgp-tab", data, nil)
+			return
+		}
+		if warning, ok := applyWarning(writeErr); ok {
+			writePageJSON(w, http.StatusOK, "bgp-tab", data, &warning)
+			return
+		}
+		data.Error = writeErr.Error()
+		writePageJSON(w, http.StatusInternalServerError, "bgp-tab", data, nil)
+		return
+	}
+
+	data.Success = "BGP server configuration saved successfully."
 	writePageJSON(w, http.StatusOK, "bgp-tab", data, nil)
 }
 
@@ -199,9 +267,7 @@ func (h *handler) DeleteBGPPeer(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	data := bgpTabData{BGPStats: bgp.GetBGPStats()}
-	h.store.Read(func(cfg *models.AppConfig) { data.CustomPeers.Peers = cfg.BGPPeers })
-	writePageJSON(w, http.StatusOK, "bgp-tab", data, warning)
+	writePageJSON(w, http.StatusOK, "bgp-tab", h.buildBGPTabData(), warning)
 }
 
 // renderBGPPeerFormError re-renders the form with the rejected input still in it.
