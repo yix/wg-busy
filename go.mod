@@ -1,6 +1,6 @@
 module github.com/yix/wg-busy
 
-go 1.26.0
+go 1.26
 
 require (
 	github.com/bio-routing/bio-rd v0.1.11-0.20260319121933-14a8de966e8b
