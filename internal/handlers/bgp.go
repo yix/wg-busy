@@ -140,7 +140,7 @@ func (h *handler) CreateBGPPeer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	_, bgpConnect, bgpRedistributeConnected, bgpMaxReceivedPrefixLength, bgpMaxAdvertisedPrefixLength, bgpPeerIP, bgpPeerPort, bgpPeerASN, bgpRouteFilters, bgpExportFilters := parsePeerBGPForm(r)
+	bgpConnect, bgpRedistributeConnected, bgpMaxReceivedPrefixLength, bgpMaxAdvertisedPrefixLength, bgpPeerIP, bgpPeerPort, bgpPeerASN, bgpRouteFilters, bgpExportFilters := parseBGPPeerForm(r)
 
 	now := time.Now().UTC()
 	peer := models.BGPPeer{
@@ -189,7 +189,7 @@ func (h *handler) UpdateBGPPeer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	_, bgpConnect, bgpRedistributeConnected, bgpMaxReceivedPrefixLength, bgpMaxAdvertisedPrefixLength, bgpPeerIP, bgpPeerPort, bgpPeerASN, bgpRouteFilters, bgpExportFilters := parsePeerBGPForm(r)
+	bgpConnect, bgpRedistributeConnected, bgpMaxReceivedPrefixLength, bgpMaxAdvertisedPrefixLength, bgpPeerIP, bgpPeerPort, bgpPeerASN, bgpRouteFilters, bgpExportFilters := parseBGPPeerForm(r)
 
 	var submitted models.BGPPeer
 
@@ -293,3 +293,88 @@ type bgpCustomPeersData struct {
 	Peers []models.BGPPeer
 	OOB   bool
 }
+
+func parseBGPPeerForm(r *http.Request) (connect, redistributeConnected bool, maxReceivedPrefixLength, maxAdvertisedPrefixLength uint16, peerIP string, peerPort uint16, peerASN uint32, routeFilters, exportFilters []models.RouteFilter) {
+	connect = r.FormValue("connect") == "on" || r.FormValue("bgpConnect") == "on"
+	redistributeConnected = r.FormValue("redistributeConnected") == "on" || r.FormValue("bgpRedistributeConnected") == "on"
+	maxReceivedPrefixLength = parseMaxPrefixLength(r.FormValue("maxReceivedPrefixLength"))
+	if maxReceivedPrefixLength == 0 {
+		maxReceivedPrefixLength = parseMaxPrefixLength(r.FormValue("bgpMaxReceivedPrefixLength"))
+	}
+	maxAdvertisedPrefixLength = parseMaxPrefixLength(r.FormValue("maxAdvertisedPrefixLength"))
+	if maxAdvertisedPrefixLength == 0 {
+		maxAdvertisedPrefixLength = parseMaxPrefixLength(r.FormValue("bgpMaxAdvertisedPrefixLength"))
+	}
+	peerIP = strings.TrimSpace(r.FormValue("peerIP"))
+	if peerIP == "" {
+		peerIP = strings.TrimSpace(r.FormValue("bgpPeerIP"))
+	}
+
+	portVal := r.FormValue("peerPort")
+	if portVal == "" {
+		portVal = r.FormValue("bgpPeerPort")
+	}
+	port, _ := strconv.ParseUint(portVal, 10, 16)
+	if port == 0 {
+		port = 179
+	}
+	peerPort = uint16(port)
+
+	asnVal := r.FormValue("peerAsn")
+	if asnVal == "" {
+		asnVal = r.FormValue("bgpPeerAsn")
+	}
+	asn, _ := strconv.ParseUint(asnVal, 10, 32)
+	if asn == 0 {
+		asn = 64512
+	}
+	peerASN = uint32(asn)
+
+	routeFilters = parseRouteFilterForm(r, "filterPrefix[]", "filterMatcher[]", "filterAction[]")
+	exportFilters = parseRouteFilterForm(r, "exportFilterPrefix[]", "exportFilterMatcher[]", "exportFilterAction[]")
+
+	return
+}
+
+func parseMaxPrefixLength(value string) uint16 {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return 0
+	}
+	length, err := strconv.ParseUint(value, 10, 16)
+	if err != nil || length > 128 {
+		return 129 // Preserve an invalid value so model validation rejects the form.
+	}
+	return uint16(length)
+}
+
+func parseRouteFilterForm(r *http.Request, prefixField, matcherField, actionField string) []models.RouteFilter {
+	var filters []models.RouteFilter
+	prefixes := r.Form[prefixField]
+	matchers := r.Form[matcherField]
+	actions := r.Form[actionField]
+
+	for i := 0; i < len(prefixes); i++ {
+		pfx := strings.TrimSpace(prefixes[i])
+		if pfx == "" {
+			continue
+		}
+		matcher := "exact"
+		if i < len(matchers) {
+			matcher = strings.TrimSpace(matchers[i])
+		}
+		action := "accept"
+		if i < len(actions) {
+			action = strings.TrimSpace(actions[i])
+		}
+
+		filters = append(filters, models.RouteFilter{
+			Prefix:  pfx,
+			Matcher: matcher,
+			Action:  action,
+		})
+	}
+
+	return filters
+}
+

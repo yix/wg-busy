@@ -26,8 +26,6 @@ func (c AppConfig) Clone() AppConfig {
 		clone.Peers[i].ExitNodeRoutes = append([]string(nil), c.Peers[i].ExitNodeRoutes...)
 		clone.Peers[i].AdvertisedRoutes = append([]string(nil), c.Peers[i].AdvertisedRoutes...)
 		clone.Peers[i].PolicyRoutes = append([]string(nil), c.Peers[i].PolicyRoutes...)
-		clone.Peers[i].BGPRouteFilters = append([]RouteFilter(nil), c.Peers[i].BGPRouteFilters...)
-		clone.Peers[i].BGPExportFilters = append([]RouteFilter(nil), c.Peers[i].BGPExportFilters...)
 	}
 	clone.BGPPeers = append([]BGPPeer(nil), c.BGPPeers...)
 	for i := range clone.BGPPeers {
@@ -209,21 +207,6 @@ type Peer struct {
 	RoutingTableID       uint     `yaml:"routingTableID,omitempty"`
 	PolicyRoutingTableID uint     `yaml:"policyRoutingTableID,omitempty"`
 	Enabled              bool     `yaml:"enabled"`
-
-	// BGP
-	BGPEnabled bool `yaml:"bgpEnabled,omitempty"`
-	BGPConnect bool `yaml:"bgpConnect,omitempty"`
-	// BGPRedistributeConnected advertises this host's local and connected routes.
-	BGPRedistributeConnected     bool   `yaml:"bgpRedistributeConnected,omitempty"`
-	BGPMaxReceivedPrefixLength   uint16 `yaml:"bgpMaxReceivedPrefixLength,omitempty"`
-	BGPMaxAdvertisedPrefixLength uint16 `yaml:"bgpMaxAdvertisedPrefixLength,omitempty"`
-	BGPPeerIP                    string `yaml:"bgpPeerIP,omitempty"`
-	BGPPeerPort                  uint16 `yaml:"bgpPeerPort,omitempty"`
-	BGPPeerASN                   uint32 `yaml:"bgpPeerAsn,omitempty"`
-	// BGPRouteFilters governs which prefixes received from this peer are accepted.
-	BGPRouteFilters []RouteFilter `yaml:"bgpRouteFilters,omitempty"`
-	// BGPExportFilters governs which locally known prefixes are advertised to this peer.
-	BGPExportFilters []RouteFilter `yaml:"bgpExportFilters,omitempty"`
 
 	CreatedAt time.Time `yaml:"createdAt"`
 	UpdatedAt time.Time `yaml:"updatedAt"`
@@ -540,29 +523,6 @@ func (p *Peer) Validate(gateways []GatewayNet) ValidationErrors {
 		})
 	}
 
-	if p.BGPEnabled {
-		if p.BGPPeerIP == "" {
-			errs = append(errs, ValidationError{Field: "bgpPeerIP", Message: "required when BGP is enabled"})
-		} else if net.ParseIP(p.BGPPeerIP) == nil {
-			errs = append(errs, ValidationError{Field: "bgpPeerIP", Message: "must be a valid IP address"})
-		}
-		if p.BGPPeerPort == 0 {
-			errs = append(errs, ValidationError{Field: "bgpPeerPort", Message: "must be > 0"})
-		}
-		if p.BGPPeerASN == 0 {
-			errs = append(errs, ValidationError{Field: "bgpPeerAsn", Message: "required when BGP is enabled"})
-		}
-		if p.BGPMaxReceivedPrefixLength > 128 {
-			errs = append(errs, ValidationError{Field: "bgpMaxReceivedPrefixLength", Message: "must be between 0 and 128"})
-		}
-		if p.BGPMaxAdvertisedPrefixLength > 128 {
-			errs = append(errs, ValidationError{Field: "bgpMaxAdvertisedPrefixLength", Message: "must be between 0 and 128"})
-		}
-
-		errs = append(errs, validateRouteFilters(p.BGPRouteFilters, "bgpRouteFilters")...)
-		errs = append(errs, validateRouteFilters(p.BGPExportFilters, "bgpExportFilters")...)
-	}
-
 	return errs
 }
 
@@ -656,20 +616,6 @@ func ValidateConfig(cfg AppConfig) ValidationErrors {
 				})
 			} else {
 				allowedPrefixes[prefix] = p.Name
-			}
-		}
-
-		if p.BGPEnabled {
-			if p.BGPPeerPort != 179 {
-				errs = append(errs, ValidationError{Field: "bgpPeerPort", Message: "the embedded BGP engine currently supports peer port 179 only"})
-			}
-			if ip := net.ParseIP(strings.TrimSpace(p.BGPPeerIP)); ip != nil {
-				key := ip.String()
-				if previous, ok := bgpPeers[key]; ok {
-					errs = append(errs, ValidationError{Field: "bgpPeerIP", Message: fmt.Sprintf("peer %q duplicates BGP address used by %q", p.Name, previous)})
-				} else {
-					bgpPeers[key] = p.Name
-				}
 			}
 		}
 	}

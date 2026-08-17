@@ -138,15 +138,7 @@ func TestPeerLastSeenUsesNewestTimestampAndExactHoverText(t *testing.T) {
 	}
 }
 
-func TestPeerRowShowsBGPBadgeWhenEnabled(t *testing.T) {
-	templateSource, err := os.ReadFile("../../web/templates.html")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(string(templateSource), `{{#if Peer.BGPEnabled}}<span class="badge badge-via" title="BGP enabled">BGP</span>{{/if}}`) {
-		t.Fatal("peer-row Handlebars template does not conditionally render the BGP badge")
-	}
-}
+
 
 func TestVersionEndpointReturnsBuildVersion(t *testing.T) {
 	router := NewRouter(nil, fstest.MapFS{"index.html": {Data: []byte("ok")}}, nil, nil, "v0.0.1")
@@ -262,8 +254,8 @@ func TestCustomBGPPeerFormIncludesRedistributeConnectedSetting(t *testing.T) {
 	}
 	body := string(templateSource)
 	for _, name := range []string{"bgpRedistributeConnected", "bgpMaxReceivedPrefixLength", "bgpMaxAdvertisedPrefixLength"} {
-		if strings.Count(body, `name="`+name+`"`) < 2 {
-			t.Fatalf("both BGP peer forms must contain %s", name)
+		if !strings.Contains(body, `name="`+name+`"`) {
+			t.Fatalf("BGP peer form must contain %s", name)
 		}
 	}
 }

@@ -271,13 +271,6 @@
             }
         }
 
-        function toggleBGPSettings(checkbox) {
-            var bgpSettings = document.getElementById('bgp-settings-config');
-            if (bgpSettings) {
-                bgpSettings.style.display = checkbox.checked ? '' : 'none';
-            }
-        }
-
         function showAllRoutes(btn) {
             btn.style.display = 'none';
             var details = btn.closest('details');

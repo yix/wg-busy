@@ -112,19 +112,19 @@ func TestSortPeerStatsIsStableByIPAcrossRuns(t *testing.T) {
 func TestDesiredPeersRejectsUnsupportedRuntimeIdentity(t *testing.T) {
 	registry := vrf.NewVRFRegistry()
 	defVRF := registry.CreateVRFIfNotExists(vrf.DefaultVRFName, 0)
-	peer := models.Peer{
-		Name: "first", Enabled: true, BGPEnabled: true,
-		BGPPeerIP: "10.0.0.2", BGPPeerPort: 180, BGPPeerASN: 64513,
+	peer := models.BGPPeer{
+		Name: "first", Enabled: true,
+		PeerIP: "10.0.0.2", PeerPort: 180, PeerASN: 64513,
 	}
-	cfg := &models.AppConfig{Server: models.ServerConfig{BGPASN: 64512}, Peers: []models.Peer{peer}}
+	cfg := &models.AppConfig{Server: models.ServerConfig{BGPASN: 64512}, BGPPeers: []models.BGPPeer{peer}}
 	if _, err := desiredPeers(cfg, defVRF, 1, nil); err == nil {
 		t.Fatal("unsupported BGP peer port was accepted")
 	}
 
-	peer.BGPPeerPort = 179
+	peer.PeerPort = 179
 	duplicate := peer
 	duplicate.Name = "second"
-	cfg.Peers = []models.Peer{peer, duplicate}
+	cfg.BGPPeers = []models.BGPPeer{peer, duplicate}
 	if _, err := desiredPeers(cfg, defVRF, 1, nil); err == nil {
 		t.Fatal("duplicate BGP peer IP was accepted")
 	}
@@ -135,9 +135,9 @@ func TestDesiredPeersUseStableAddressIdentity(t *testing.T) {
 	defVRF := registry.CreateVRFIfNotExists(vrf.DefaultVRFName, 0)
 	cfg := &models.AppConfig{
 		Server: models.ServerConfig{BGPASN: 64512, BGPListenAddress: "10.0.0.1"},
-		Peers: []models.Peer{{
-			Name: "peer", Enabled: true, BGPEnabled: true,
-			BGPPeerIP: "10.0.0.2", BGPPeerPort: 179, BGPPeerASN: 64513,
+		BGPPeers: []models.BGPPeer{{
+			Name: "peer", Enabled: true,
+			PeerIP: "10.0.0.2", PeerPort: 179, PeerASN: 64513,
 		}},
 	}
 
@@ -164,16 +164,16 @@ func TestDesiredPeersUseStableAddressIdentity(t *testing.T) {
 func TestRouteFilterChangeRequiresDurablePeerReplacement(t *testing.T) {
 	registry := vrf.NewVRFRegistry()
 	defVRF := registry.CreateVRFIfNotExists(vrf.DefaultVRFName, 0)
-	peer := models.Peer{
-		Name: "peer", Enabled: true, BGPEnabled: true,
-		BGPPeerIP: "10.0.0.2", BGPPeerPort: 179, BGPPeerASN: 64513,
+	peer := models.BGPPeer{
+		Name: "peer", Enabled: true,
+		PeerIP: "10.0.0.2", PeerPort: 179, PeerASN: 64513,
 	}
-	cfg := &models.AppConfig{Server: models.ServerConfig{BGPASN: 64512}, Peers: []models.Peer{peer}}
+	cfg := &models.AppConfig{Server: models.ServerConfig{BGPASN: 64512}, BGPPeers: []models.BGPPeer{peer}}
 	before, err := desiredPeers(cfg, defVRF, 1, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	cfg.Peers[0].BGPRouteFilters = []models.RouteFilter{{Prefix: "10.0.0.0/8", Matcher: "orlonger", Action: "accept"}}
+	cfg.BGPPeers[0].RouteFilters = []models.RouteFilter{{Prefix: "10.0.0.0/8", Matcher: "orlonger", Action: "accept"}}
 	after, err := desiredPeers(cfg, defVRF, 1, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -195,9 +195,9 @@ func TestRedistributeConnectedChangeRequiresDurablePeerReplacement(t *testing.T)
 	defVRF := registry.CreateVRFIfNotExists(vrf.DefaultVRFName, 0)
 	cfg := &models.AppConfig{
 		Server: models.ServerConfig{BGPASN: 64512},
-		Peers: []models.Peer{{
-			Name: "peer", Enabled: true, BGPEnabled: true,
-			BGPPeerIP: "10.0.0.2", BGPPeerPort: 179, BGPPeerASN: 64513,
+		BGPPeers: []models.BGPPeer{{
+			Name: "peer", Enabled: true,
+			PeerIP: "10.0.0.2", PeerPort: 179, PeerASN: 64513,
 		}},
 	}
 
@@ -206,7 +206,7 @@ func TestRedistributeConnectedChangeRequiresDurablePeerReplacement(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	cfg.Peers[0].BGPRedistributeConnected = true
+	cfg.BGPPeers[0].RedistributeConnected = true
 	after, err := desiredPeers(cfg, defVRF, 1, localPrefixes)
 	if err != nil {
 		t.Fatal(err)
@@ -294,9 +294,9 @@ func TestMaxPrefixLengthChangeRequiresDurablePeerReplacement(t *testing.T) {
 	defVRF := registry.CreateVRFIfNotExists(vrf.DefaultVRFName, 0)
 	cfg := &models.AppConfig{
 		Server: models.ServerConfig{BGPASN: 64512},
-		Peers: []models.Peer{{
-			Name: "peer", Enabled: true, BGPEnabled: true,
-			BGPPeerIP: "10.0.0.2", BGPPeerPort: 179, BGPPeerASN: 64513,
+		BGPPeers: []models.BGPPeer{{
+			Name: "peer", Enabled: true,
+			PeerIP: "10.0.0.2", PeerPort: 179, PeerASN: 64513,
 		}},
 	}
 
@@ -304,8 +304,8 @@ func TestMaxPrefixLengthChangeRequiresDurablePeerReplacement(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	cfg.Peers[0].BGPMaxReceivedPrefixLength = 24
-	cfg.Peers[0].BGPMaxAdvertisedPrefixLength = 24
+	cfg.BGPPeers[0].MaxReceivedPrefixLength = 24
+	cfg.BGPPeers[0].MaxAdvertisedPrefixLength = 24
 	after, err := desiredPeers(cfg, defVRF, 1, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -338,7 +338,7 @@ func TestDesiredLocalPrefixesRequiresOptInPeer(t *testing.T) {
 	}
 	t.Cleanup(func() { interfaceAddresses = original })
 
-	cfg := &models.AppConfig{Peers: []models.Peer{{Enabled: true, BGPEnabled: true, BGPRedistributeConnected: true}}}
+	cfg := &models.AppConfig{BGPPeers: []models.BGPPeer{{Enabled: true, RedistributeConnected: true}}}
 	prefixes, err := desiredLocalPrefixes(cfg)
 	if err != nil {
 		t.Fatal(err)
@@ -348,7 +348,7 @@ func TestDesiredLocalPrefixesRequiresOptInPeer(t *testing.T) {
 		t.Fatalf("desiredLocalPrefixes() = %v, want %v", prefixes, want)
 	}
 
-	cfg.Peers[0].BGPRedistributeConnected = false
+	cfg.BGPPeers[0].RedistributeConnected = false
 	prefixes, err = desiredLocalPrefixes(cfg)
 	if err != nil {
 		t.Fatal(err)

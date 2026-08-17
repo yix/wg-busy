@@ -197,20 +197,6 @@ func extraListenHosts(primary string) []string {
 func desiredPeers(cfg *models.AppConfig, defVRF *vrf.VRF, routerID uint32, localPrefixes []string) (map[bnet.IP]server.PeerConfig, error) {
 	desired := make(map[bnet.IP]server.PeerConfig)
 
-	for _, p := range cfg.Peers {
-		if !p.Enabled || !p.BGPEnabled {
-			continue
-		}
-		bPeerIP, peerCfg, err := buildPeerConfig(cfg, defVRF, routerID, p.Name, p.BGPConnect, p.BGPRedistributeConnected, p.BGPMaxReceivedPrefixLength, p.BGPMaxAdvertisedPrefixLength, p.BGPPeerIP, p.BGPPeerPort, p.BGPPeerASN, p.BGPRouteFilters, p.BGPExportFilters, localPrefixes)
-		if err != nil {
-			return nil, err
-		}
-		if _, exists := desired[bPeerIP]; exists {
-			return nil, fmt.Errorf("multiple enabled BGP peers use address %s", bPeerIP.String())
-		}
-		desired[bPeerIP] = peerCfg
-	}
-
 	for _, p := range cfg.BGPPeers {
 		if !p.Enabled {
 			continue
@@ -595,11 +581,6 @@ func prependMaxPrefixLengthFilter(chain filter.Chain, kind string, max uint16) f
 }
 
 func wantsLocalRoutes(cfg *models.AppConfig) bool {
-	for _, peer := range cfg.Peers {
-		if peer.Enabled && peer.BGPEnabled && peer.BGPRedistributeConnected {
-			return true
-		}
-	}
 	for _, peer := range cfg.BGPPeers {
 		if peer.Enabled && peer.RedistributeConnected {
 			return true
@@ -644,15 +625,6 @@ func applyRuntimeConfig(runtime *bgpRuntime, cfg *models.AppConfig) error {
 	}
 
 	peerNames := make(map[string]string)
-	for _, p := range cfg.Peers {
-		if p.BGPEnabled && p.Enabled && p.BGPPeerIP != "" {
-			if ip, err := bnet.IPFromString(p.BGPPeerIP); err == nil {
-				peerNames[ip.String()] = p.Name
-			} else {
-				peerNames[p.BGPPeerIP] = p.Name
-			}
-		}
-	}
 	for _, p := range cfg.BGPPeers {
 		if p.Enabled && p.PeerIP != "" {
 			if ip, err := bnet.IPFromString(p.PeerIP); err == nil {

@@ -93,7 +93,6 @@
     <div class="peer-info">
         <strong>
             {{Peer.Name}}
-            {{#if Peer.BGPEnabled}}<span class="badge badge-via" title="BGP enabled">BGP</span>{{/if}}
             {{#if Peer.IsExitNode}}<span class="badge badge-exit">Exit Node</span>{{/if}}
             {{#if ExitNodeName}}<span class="badge badge-via">via {{ExitNodeName}}</span>{{/if}}
             {{#if Peer.StrictPolicyRouting}}<span class="badge badge-warn" title="Traffic may only use this peer's own routes">Strict</span>{{/if}}
@@ -297,101 +296,6 @@
                     </select>
                 </label>
             </div>
-
-            <fieldset>
-                <legend>BGP Overlay Settings</legend>
-                <label>
-                    <input type="checkbox" id="bgpEnabled" name="bgpEnabled" {{#if Peer.BGPEnabled}}checked{{/if}} onchange="toggleBGPSettings(this)">
-                    Enable BGP
-                </label>
-                <div id="bgp-settings-config" {{#unless Peer.BGPEnabled}}style="display:none"{{/unless}}>
-                    <label>
-                        <input type="checkbox" name="bgpConnect" {{#if Peer.BGPConnect}}checked{{/if}} title="Actively initiate connection to the peer"> Connect
-                    </label>
-                    <label>
-                        <input type="checkbox" name="bgpRedistributeConnected" {{#if Peer.BGPRedistributeConnected}}checked{{/if}}>
-                        Redistribute local and connected routes
-                        <small>Advertise this host's active interface addresses and connected networks. Advertised prefix filters still apply.</small>
-                    </label>
-                    <div class="grid">
-                        <label>
-                            Peer BGP IP *
-                            <input type="text" name="bgpPeerIP" value="{{Peer.BGPPeerIP}}" placeholder="10.0.0.123" {{#if (hasField ValidationErrors "bgpPeerIP")}}aria-invalid="true"{{/if}}>
-                            {{#each ValidationErrors}}{{#if (eq Field "bgpPeerIP")}}<small class="field-error">{{Message}}</small>{{/if}}{{/each}}
-                        </label>
-                        <label>
-                            Peer ASN *
-                            <input type="number" name="bgpPeerAsn" value="{{#if Peer.BGPPeerASN}}{{Peer.BGPPeerASN}}{{else}}64512{{/if}}" {{#if (hasField ValidationErrors "bgpPeerAsn")}}aria-invalid="true"{{/if}}>
-                            {{#each ValidationErrors}}{{#if (eq Field "bgpPeerAsn")}}<small class="field-error">{{Message}}</small>{{/if}}{{/each}}
-                        </label>
-                        <label>
-                            Peer Port *
-                            <input type="number" name="bgpPeerPort" value="179" min="179" max="179" readonly {{#if (hasField ValidationErrors "bgpPeerPort")}}aria-invalid="true"{{/if}}>
-                            <small>The embedded BGP engine currently supports peer port 179.</small>
-                            {{#each ValidationErrors}}{{#if (eq Field "bgpPeerPort")}}<small class="field-error">{{Message}}</small>{{/if}}{{/each}}
-                        </label>
-                    </div>
-
-                    <div class="grid">
-                        <label>
-                            Max received prefix length
-                            <input type="number" name="bgpMaxReceivedPrefixLength" value="{{#if Peer.BGPMaxReceivedPrefixLength}}{{Peer.BGPMaxReceivedPrefixLength}}{{/if}}" min="0" max="128" placeholder="Unlimited" {{#if (hasField ValidationErrors "bgpMaxReceivedPrefixLength")}}aria-invalid="true"{{/if}}>
-                            <small>Inclusive. For example, 24 accepts /24 and rejects /25 or longer. Leave blank or use 0 for unlimited.</small>
-                            {{#each ValidationErrors}}{{#if (eq Field "bgpMaxReceivedPrefixLength")}}<small class="field-error">{{Message}}</small>{{/if}}{{/each}}
-                        </label>
-                        <label>
-                            Max advertised prefix length
-                            <input type="number" name="bgpMaxAdvertisedPrefixLength" value="{{#if Peer.BGPMaxAdvertisedPrefixLength}}{{Peer.BGPMaxAdvertisedPrefixLength}}{{/if}}" min="0" max="128" placeholder="Unlimited" {{#if (hasField ValidationErrors "bgpMaxAdvertisedPrefixLength")}}aria-invalid="true"{{/if}}>
-                            <small>Inclusive. Prefixes longer than this value are not advertised. Leave blank or use 0 for unlimited.</small>
-                            {{#each ValidationErrors}}{{#if (eq Field "bgpMaxAdvertisedPrefixLength")}}<small class="field-error">{{Message}}</small>{{/if}}{{/each}}
-                        </label>
-                    </div>
-                    
-                    <div style="margin-top: 1rem;">
-                        <label>Received Prefix Filters</label>
-                        <small>Controls which prefixes received from this peer are accepted. Leave empty to accept everything.</small>
-                        <div id="bgp-route-filters-list">
-                            {{#each Peer.BGPRouteFilters}}
-                            <div class="route-filter-row" style="display:flex; gap:0.5rem; margin-bottom:0.5rem;">
-                                <input type="text" name="filterPrefix[]" value="{{Prefix}}" placeholder="Prefix (e.g. 10.1.0.0/16)" style="flex:1">
-                                <select name="filterMatcher[]" style="width:auto">
-                                    <option value="exact" {{#if (eq Matcher "exact")}}selected{{/if}}>Exact</option>
-                                    <option value="orlonger" {{#if (eq Matcher "orlonger")}}selected{{/if}}>Or Longer</option>
-                                </select>
-                                <select name="filterAction[]" style="width:auto">
-                                    <option value="accept" {{#if (eq Action "accept")}}selected{{/if}}>Accept</option>
-                                    <option value="reject" {{#if (eq Action "reject")}}selected{{/if}}>Reject</option>
-                                </select>
-                                <button type="button" class="btn btn-outline-danger" style="width:auto" onclick="this.closest('.route-filter-row').remove()">X</button>
-                            </div>
-                            {{/each}}
-                        </div>
-                        <button type="button" class="btn btn-outline secondary" style="width:auto; margin-top:0.5rem;" onclick="addRouteFilterRow()">+ Add Filter</button>
-                    </div>
-
-                    <div style="margin-top: 1rem;">
-                        <label>Advertised Prefix Filters</label>
-                        <small>Controls which locally known prefixes are advertised to this peer. Leave empty to advertise everything.</small>
-                        <div id="bgp-export-filters-list">
-                            {{#each Peer.BGPExportFilters}}
-                            <div class="route-filter-row" style="display:flex; gap:0.5rem; margin-bottom:0.5rem;">
-                                <input type="text" name="exportFilterPrefix[]" value="{{Prefix}}" placeholder="Prefix (e.g. 10.1.0.0/16)" style="flex:1">
-                                <select name="exportFilterMatcher[]" style="width:auto">
-                                    <option value="exact" {{#if (eq Matcher "exact")}}selected{{/if}}>Exact</option>
-                                    <option value="orlonger" {{#if (eq Matcher "orlonger")}}selected{{/if}}>Or Longer</option>
-                                </select>
-                                <select name="exportFilterAction[]" style="width:auto">
-                                    <option value="accept" {{#if (eq Action "accept")}}selected{{/if}}>Accept</option>
-                                    <option value="reject" {{#if (eq Action "reject")}}selected{{/if}}>Reject</option>
-                                </select>
-                                <button type="button" class="btn btn-outline-danger" style="width:auto" onclick="this.closest('.route-filter-row').remove()">X</button>
-                            </div>
-                            {{/each}}
-                        </div>
-                        <button type="button" class="btn btn-outline secondary" style="width:auto; margin-top:0.5rem;" onclick="addRouteFilterRow('bgp-export-filters-list', 'exportFilter')">+ Add Filter</button>
-                    </div>
-                </div>
-            </fieldset>
 
             <footer>
                 <button type="button" class="btn btn-secondary" onclick="closeModal()">Cancel</button>
@@ -774,7 +678,7 @@
         <button class="btn btn-primary" style="width:auto" hx-get="bgp/peers/new" hx-target="#modal-container" hx-swap="innerHTML">+ Add Peer</button>
     </div>
     {{#unless Peers}}
-    <p><small class="text-muted">No standalone BGP peers configured. A WireGuard peer can also enable BGP from its own edit form.</small></p>
+    <p><small class="text-muted">No custom BGP peers configured.</small></p>
     {{else}}
     {{#each Peers}}
     <article class="flex-row" style="align-items:center;">

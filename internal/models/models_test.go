@@ -195,7 +195,10 @@ func TestAppConfigCloneIsIndependent(t *testing.T) {
 			ID: "p1", ExitNodeRoutes: []string{"10.0.0.0/8"},
 			AdvertisedRoutes: []string{"192.0.2.0/24"},
 			PolicyRoutes:     []string{"198.51.100.0/24 via 10.0.0.2"},
-			BGPRouteFilters:  []RouteFilter{{Prefix: "203.0.113.0/24"}},
+		}},
+		BGPPeers: []BGPPeer{{
+			ID: "bgp1", Name: "bgp1",
+			RouteFilters: []RouteFilter{{Prefix: "203.0.113.0/24"}},
 		}},
 		ZeroTier: ZeroTierConfig{Networks: []ZeroTierNetwork{{ID: "8056c2e21c000001", Name: "old"}}},
 	}
@@ -203,13 +206,13 @@ func TestAppConfigCloneIsIndependent(t *testing.T) {
 	clone.Peers[0].ExitNodeRoutes[0] = "changed"
 	clone.Peers[0].AdvertisedRoutes[0] = "changed"
 	clone.Peers[0].PolicyRoutes[0] = "changed"
-	clone.Peers[0].BGPRouteFilters[0].Prefix = "changed"
+	clone.BGPPeers[0].RouteFilters[0].Prefix = "changed"
 	clone.ZeroTier.Networks[0].Name = "changed"
 
 	if original.Peers[0].ExitNodeRoutes[0] == "changed" ||
 		original.Peers[0].AdvertisedRoutes[0] == "changed" ||
 		original.Peers[0].PolicyRoutes[0] == "changed" ||
-		original.Peers[0].BGPRouteFilters[0].Prefix == "changed" ||
+		original.BGPPeers[0].RouteFilters[0].Prefix == "changed" ||
 		original.ZeroTier.Networks[0].Name == "changed" {
 		t.Fatal("Clone shares mutable slices with the original")
 	}
@@ -294,36 +297,21 @@ func TestValidateConfigRejectsRuntimePeerCollisions(t *testing.T) {
 		}
 	})
 
-	t.Run("BGP address and port", func(t *testing.T) {
-		first := validPeer()
-		first.ID, first.Name, first.PublicKey = "first", "first", testKey("B")
-		first.Enabled, first.BGPEnabled = true, true
-		first.BGPPeerIP, first.BGPPeerASN, first.BGPPeerPort = "10.0.0.2", 64513, 180
-		second := validPeer()
-		second.ID, second.Name, second.PublicKey = "second", "second", testKey("C")
-		second.AllowedIPs = "10.0.0.6/32"
-		second.Enabled, second.BGPEnabled = true, true
-		second.BGPPeerIP, second.BGPPeerASN, second.BGPPeerPort = "10.0.0.2", 64514, 179
-		errs := ValidateConfig(validConfig(first, second))
-		if !errs.HasField("bgpPeerPort") || !errs.HasField("bgpPeerIP") {
-			t.Fatalf("BGP collision errors = %v", errs)
+	t.Run("BGP address collision", func(t *testing.T) {
+		first := BGPPeer{ID: "first", Name: "first", Enabled: true, PeerIP: "10.0.0.2", PeerASN: 64513, PeerPort: 179}
+		second := BGPPeer{ID: "second", Name: "second", Enabled: true, PeerIP: "10.0.0.2", PeerASN: 64514, PeerPort: 179}
+		cfg := validConfig()
+		cfg.BGPPeers = []BGPPeer{first, second}
+		errs := ValidateConfig(cfg)
+		if !errs.HasField("bgpPeerIP") {
+			t.Fatalf("BGP collision errors = %v, want bgpPeerIP", errs)
 		}
 	})
 }
 
 func TestBGPMaxPrefixLengthValidation(t *testing.T) {
-	peer := validPeer()
-	peer.BGPEnabled = true
-	peer.BGPPeerIP, peer.BGPPeerPort, peer.BGPPeerASN = "10.0.0.2", 179, 64513
-	peer.BGPMaxReceivedPrefixLength = 129
-	peer.BGPMaxAdvertisedPrefixLength = 130
-	errs := peer.Validate(nil)
-	if !errs.HasField("bgpMaxReceivedPrefixLength") || !errs.HasField("bgpMaxAdvertisedPrefixLength") {
-		t.Fatalf("WireGuard BGP max-prefix errors = %v", errs)
-	}
-
 	custom := BGPPeer{Name: "custom", PeerIP: "10.0.0.3", PeerPort: 179, PeerASN: 64514, MaxReceivedPrefixLength: 129, MaxAdvertisedPrefixLength: 130}
-	errs = custom.Validate()
+	errs := custom.Validate()
 	if !errs.HasField("bgpMaxReceivedPrefixLength") || !errs.HasField("bgpMaxAdvertisedPrefixLength") {
 		t.Fatalf("custom BGP max-prefix errors = %v", errs)
 	}
