@@ -21,3 +21,9 @@ A dedicated dashboard for BGP sessions showing realtime stats on peer uptimes, r
 Run the managed ZeroTier client, join networks, inspect service and network status, and troubleshoot networks that have not joined.
 
 ![ZeroTier Management](wg-busy-4-zerotier.jpg)
+
+## BGP Peer Configuration
+Define custom standalone BGP peers or route reflectors with connection initiation controls, local route redistribution, prefix length boundaries, and fine-grained import/export prefix filtering.
+
+![BGP Peer Configuration](wg-busy-5-bgp-peer-dialog.jpg)
+

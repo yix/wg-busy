@@ -70,8 +70,16 @@
     <div id="toast-container" class="toast-container" popover="manual" aria-live="polite"></div>
 
     <script>
+        // URL query parameters support
+        var urlParams = new URLSearchParams(window.location.search);
+        var initialTheme = urlParams.get('theme');
+
         // Theme toggling
         function initTheme() {
+            if (initialTheme === 'dark' || initialTheme === 'light') {
+                document.documentElement.setAttribute('data-theme', initialTheme);
+                return;
+            }
             var saved = localStorage.getItem('theme');
             if (saved === 'dark' || saved === 'light') {
                 document.documentElement.setAttribute('data-theme', saved);
@@ -87,6 +95,27 @@
             localStorage.setItem('theme', next);
         }
         initTheme();
+
+        // Initial tab routing via query parameter (?tab=server|bgp|zerotier)
+        var targetTab = urlParams.get('tab');
+        if (targetTab) {
+            var tabBtn = document.querySelector('.tabs button[data-stats-kind="' + targetTab + '"]');
+            if (tabBtn) {
+                document.querySelectorAll('.tabs button').forEach(function(b) { b.classList.remove('active'); });
+                tabBtn.classList.add('active');
+                document.getElementById('active-stats-kind').value = targetTab;
+                var tabContent = document.getElementById('tab-content');
+                tabContent.setAttribute('hx-get', tabBtn.getAttribute('hx-get'));
+            }
+        }
+
+        if (urlParams.get('modal') === 'bgp-peer') {
+            document.body.addEventListener('templates-ready', function () {
+                setTimeout(function () {
+                    htmx.ajax('GET', 'bgp/peers/new', { target: '#modal-container', swap: 'innerHTML' });
+                }, 100);
+            });
+        }
 
         function copyText(text, btn) {
             if (!navigator.clipboard) return;
@@ -207,6 +236,10 @@
             var toastContainer = document.getElementById('toast-container');
             if (toastContainer.children.length && toastContainer.showPopover && !toastContainer.matches(':popover-open')) {
                 toastContainer.showPopover();
+            }
+
+            if (urlParams.get('unfold') === '1') {
+                document.querySelectorAll('details').forEach(function (d) { d.open = true; });
             }
         });
 
