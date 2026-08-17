@@ -135,12 +135,19 @@ h1, h2, h3, h4, h5, h6 {
   font-weight: 600;
   color: var(--text-main);
   letter-spacing: -0.02em;
+  line-height: 1.3;
 }
 
 h1 { font-size: 2rem; }
-h2 { font-size: 1.5rem; }
-h3 { font-size: 1.25rem; }
-h4 { font-size: 1.1rem; }
+h2 { font-size: 1.5rem; margin-bottom: 1.25rem; }
+h3 { font-size: 1.25rem; margin-top: 2rem; margin-bottom: 1rem; }
+h4 { font-size: 1.05rem; margin-top: 1.75rem; margin-bottom: 0.85rem; }
+
+.header-row h2,
+.header-row h3,
+.header-row h4 {
+  margin: 0 !important;
+}
 
 a {
   color: var(--primary);
@@ -172,13 +179,24 @@ small {
 }
 
 /* ==========================================================================
-   Layout Containers
+   Layout Containers & Dividers
    ========================================================================== */
 
 .container {
   max-width: 960px;
   margin: 0 auto;
   padding: 2rem 1.25rem calc(2rem + env(safe-area-inset-bottom, 0px)) 1.25rem;
+}
+
+.config-section {
+  margin-bottom: 2rem;
+}
+
+.divider {
+  height: 1px;
+  background-color: var(--border-color);
+  margin: 2.25rem 0;
+  border: none;
 }
 
 .grid {
@@ -344,7 +362,7 @@ small {
 .tabs {
   display: flex;
   border-bottom: 2px solid var(--border-color);
-  margin-bottom: 1.5rem;
+  margin-bottom: 1.75rem;
   gap: 0.25rem;
   overflow-x: auto;
   -webkit-overflow-scrolling: touch;
@@ -413,6 +431,40 @@ article footer {
   display: flex;
   justify-content: flex-end;
   gap: 0.75rem;
+}
+
+/* Stat Widget Cards */
+.stat-card {
+  padding: 1rem 1.25rem;
+  margin-bottom: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+}
+
+.stat-card header {
+  margin-bottom: 0.5rem;
+  padding-bottom: 0.4rem;
+  border-bottom: 1px solid var(--border-color);
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.stat-card header strong {
+  color: var(--text-muted);
+  font-weight: 600;
+}
+
+.stat-card > div {
+  font-size: 1.05rem;
+  font-weight: 600;
+  font-family: var(--font-mono);
+  color: var(--text-main);
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.35rem;
 }
 
 details {
@@ -561,7 +613,17 @@ button:active, .btn:active {
 form {
   display: flex;
   flex-direction: column;
-  gap: 1.1rem;
+  gap: 1.25rem;
+  margin-bottom: 2rem;
+}
+
+form > button[type="submit"],
+form > .btn-primary {
+  align-self: flex-start;
+  min-height: 42px;
+  padding: 0.65rem 1.65rem;
+  font-weight: 600;
+  margin-top: 0.35rem;
 }
 
 label {
@@ -615,12 +677,12 @@ input[type="checkbox"] {
 fieldset {
   border: 1px solid var(--border-color);
   border-radius: var(--border-radius);
-  padding: 1.1rem;
+  padding: 1.25rem;
   margin: 0;
   background: var(--card-bg);
   display: flex;
   flex-direction: column;
-  gap: 0.65rem;
+  gap: 0.75rem;
 }
 
 legend {

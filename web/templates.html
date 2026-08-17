@@ -527,56 +527,65 @@
     {{#if Error}}<div class="toast toast-error" role="alert">{{Error}}</div>{{/if}}
     {{> error-summary ValidationErrors}}
 
-    <form hx-put="zerotier" hx-target="#tab-content" hx-swap="innerHTML">
-        <fieldset>
-            <label>
-                <input type="checkbox" name="ztEnabled" {{#if Config.Enabled}}checked{{/if}}>
-                Enable ZeroTier
-            </label>
-            <label>
-                <input type="checkbox" name="ztMasquerade" {{#unless Config.DisableMasquerade}}checked{{/unless}}>
-                Masquerade WireGuard traffic over ZeroTier
-            </label>
-            <small>Disable this when the ZeroTier network already has a route back to the WireGuard subnet.</small>
-            <label>
-                <input type="checkbox" name="ztExcludeAdvertisedRoutesFromMasquerade" {{#if Config.ExcludeAdvertisedRoutesFromMasquerade}}checked{{/if}}>
-                Exclude advertised networks from masquerade
-            </label>
-            <small>Adds NAT bypass rules for enabled peers' advertised IPv4 networks. The ZeroTier network must have routes back to them.</small>
-        </fieldset>
-        <div class="grid">
-            <label>
-                Primary Port
-                <input type="number" name="ztPort" value="{{Port}}" min="1024" max="65535"
-                       placeholder="9993"
-                       {{#if (hasField ValidationErrors "ztPort")}}aria-invalid="true"{{/if}}>
-                <small>UDP port for peer-to-peer traffic. Changing it restarts the service.</small>
-            </label>
-        </div>
-        <button type="submit" class="btn btn-primary">Save Settings</button>
-    </form>
+    <section class="config-section">
+        <form hx-put="zerotier" hx-target="#tab-content" hx-swap="innerHTML">
+            <fieldset>
+                <legend>ZeroTier Configuration</legend>
+                <label>
+                    <input type="checkbox" name="ztEnabled" {{#if Config.Enabled}}checked{{/if}}>
+                    Enable ZeroTier
+                </label>
+                <label>
+                    <input type="checkbox" name="ztMasquerade" {{#unless Config.DisableMasquerade}}checked{{/unless}}>
+                    Masquerade WireGuard traffic over ZeroTier
+                </label>
+                <small>Disable this when the ZeroTier network already has a route back to the WireGuard subnet.</small>
+                <label>
+                    <input type="checkbox" name="ztExcludeAdvertisedRoutesFromMasquerade" {{#if Config.ExcludeAdvertisedRoutesFromMasquerade}}checked{{/if}}>
+                    Exclude advertised networks from masquerade
+                </label>
+                <small>Adds NAT bypass rules for enabled peers' advertised IPv4 networks. The ZeroTier network must have routes back to them.</small>
+            </fieldset>
+            <div class="grid">
+                <label>
+                    Primary Port
+                    <input type="number" name="ztPort" value="{{Port}}" min="1024" max="65535"
+                           placeholder="9993"
+                           {{#if (hasField ValidationErrors "ztPort")}}aria-invalid="true"{{/if}}>
+                    <small>UDP port for peer-to-peer traffic. Changing it restarts the service.</small>
+                </label>
+            </div>
+            <button type="submit" class="btn btn-primary">Save Settings</button>
+        </form>
+    </section>
 
-    <h3>Networks</h3>
-    <form hx-post="zerotier/networks" hx-target="#tab-content" hx-swap="innerHTML">
-        <div class="grid">
-            <label>
-                Network ID *
-                <input type="text" name="networkID" required minlength="16" maxlength="16"
-                       placeholder="8056c2e21c000001" pattern="[0-9a-fA-F]{16}">
-            </label>
-            <label>
-                Label
-                <input type="text" name="networkName" maxlength="64" placeholder="e.g. Home LAN">
-            </label>
-        </div>
-        <fieldset>
-            <label><input type="checkbox" name="allowManaged" checked> Allow managed IPs and routes</label>
-            <label><input type="checkbox" name="allowGlobal"> Allow global (public) IP assignments</label>
-            <label><input type="checkbox" name="allowDefault"> Allow default route override</label>
-            <label><input type="checkbox" name="allowDNS"> Allow DNS configuration</label>
-        </fieldset>
-        <button type="submit" class="btn btn-primary">Join Network</button>
-    </form>
+    <div class="divider"></div>
+
+    <section class="config-section">
+        <h3>Join Network</h3>
+        <form hx-post="zerotier/networks" hx-target="#tab-content" hx-swap="innerHTML">
+            <div class="grid">
+                <label>
+                    Network ID *
+                    <input type="text" name="networkID" required minlength="16" maxlength="16"
+                           placeholder="8056c2e21c000001" pattern="[0-9a-fA-F]{16}">
+                </label>
+                <label>
+                    Label
+                    <input type="text" name="networkName" maxlength="64" placeholder="e.g. Home LAN">
+                </label>
+            </div>
+            <fieldset>
+                <label><input type="checkbox" name="allowManaged" checked> Allow managed IPs and routes</label>
+                <label><input type="checkbox" name="allowGlobal"> Allow global (public) IP assignments</label>
+                <label><input type="checkbox" name="allowDefault"> Allow default route override</label>
+                <label><input type="checkbox" name="allowDNS"> Allow DNS configuration</label>
+            </fieldset>
+            <button type="submit" class="btn btn-primary">Join Network</button>
+        </form>
+    </section>
+
+    <div class="divider"></div>
 
     {{> zerotier-status this}}
 </div>
@@ -600,8 +609,9 @@
     {{#if Snapshot.Err}}<div class="toast toast-error" role="alert">{{Snapshot.Err}}</div>{{/if}}
 
     <div class="grid" style="margin-bottom: 2rem;">
-        <article>
+        <article class="stat-card">
             <header><strong>Service</strong></header>
+            <div>
             {{#if Snapshot.ServiceErr}}
             <span class="status-dot status-down"></span> Running, degraded
             {{else if Snapshot.Running}}
@@ -609,29 +619,39 @@
             {{else}}
             <span class="status-dot status-down"></span> Not running
             {{/if}}
+            </div>
         </article>
-        <article>
+        <article class="stat-card">
             <header><strong>Node Address</strong></header>
-            {{#if Snapshot.Status}}<code>{{Snapshot.Status.address}}</code>{{else}}&mdash;{{/if}}
+            <div>
+            {{#if Snapshot.Status}}
+                <code>{{Snapshot.Status.address}}</code>
+                <button type="button" class="copy-btn" title="Copy Address" onclick="copyText('{{Snapshot.Status.address}}', this)">Copy</button>
+            {{else}}&mdash;{{/if}}
+            </div>
         </article>
-        <article>
+        <article class="stat-card">
             <header><strong>My ZeroTier IP</strong></header>
+            <div>
             {{#if Addresses}}
                 {{#each Addresses}}<div><code>{{this}}</code></div>{{/each}}
             {{else}}
                 <span class="text-muted">Not assigned yet</span>
             {{/if}}
+            </div>
         </article>
-        <article>
+        <article class="stat-card">
             <header><strong>Online</strong></header>
+            <div>
             {{#if Snapshot.Status}}
                 {{#if Snapshot.Status.online}}
                 <span class="status-dot status-up"></span> Online{{#if Snapshot.Status.tcpFallbackActive}} (TCP relay){{/if}}
                 {{else}}
                 <span class="status-dot status-down"></span> Offline
                 {{/if}}
-                <div><small class="text-muted">v{{Snapshot.Status.version}}</small></div>
+                <small class="text-muted" style="display:inline-block; margin-left:0.35rem;">v{{Snapshot.Status.version}}</small>
             {{else}}&mdash;{{/if}}
+            </div>
         </article>
     </div>
 
@@ -907,35 +927,43 @@
     {{#if Error}}<div class="toast toast-error" role="alert">{{Error}}</div>{{/if}}
     {{> error-summary ValidationErrors}}
 
-    <form hx-put="bgp/server" hx-target="#tab-content" hx-swap="innerHTML">
-        <fieldset>
-            <legend>BGP Server Configuration</legend>
-            <label>
-                <input type="checkbox" name="bgpEnabled" {{#if BGPServer.Enabled}}checked{{/if}}>
-                Enable BGP Server
-            </label>
-            <div class="grid">
+    <section class="config-section">
+        <form hx-put="bgp/server" hx-target="#tab-content" hx-swap="innerHTML">
+            <fieldset>
+                <legend>BGP Server Configuration</legend>
                 <label>
-                    Local ASN
-                    <input type="number" name="bgpAsn" value="{{#if BGPServer.ASN}}{{BGPServer.ASN}}{{else}}64512{{/if}}" placeholder="64512" {{#if (hasField ValidationErrors "bgpAsn")}}aria-invalid="true"{{/if}}>
-                    {{#each ValidationErrors}}{{#if (eq Field "bgpAsn")}}<small class="field-error">{{Message}}</small>{{/if}}{{/each}}
+                    <input type="checkbox" name="bgpEnabled" {{#if BGPServer.Enabled}}checked{{/if}}>
+                    Enable BGP Server
                 </label>
-                <label>
-                    Listen Address
-                    <input type="text" name="bgpListenAddress" value="{{BGPServer.ListenAddress}}" placeholder="Optional; defaults to all WireGuard and ZeroTier addresses" {{#if (hasField ValidationErrors "bgpListenAddress")}}aria-invalid="true"{{/if}}>
-                    {{#each ValidationErrors}}{{#if (eq Field "bgpListenAddress")}}<small class="field-error">{{Message}}</small>{{/if}}{{/each}}
-                </label>
-                <label>
-                    Listen Port
-                    <input type="number" name="bgpListenPort" value="{{#if BGPServer.ListenPort}}{{BGPServer.ListenPort}}{{else}}179{{/if}}" min="1" max="65535" placeholder="179" {{#if (hasField ValidationErrors "bgpListenPort")}}aria-invalid="true"{{/if}}>
-                    {{#each ValidationErrors}}{{#if (eq Field "bgpListenPort")}}<small class="field-error">{{Message}}</small>{{/if}}{{/each}}
-                </label>
-            </div>
-        </fieldset>
-        <button type="submit" class="btn btn-primary">Save BGP Settings</button>
-    </form>
+                <div class="grid">
+                    <label>
+                        Local ASN
+                        <input type="number" name="bgpAsn" value="{{#if BGPServer.ASN}}{{BGPServer.ASN}}{{else}}64512{{/if}}" placeholder="64512" {{#if (hasField ValidationErrors "bgpAsn")}}aria-invalid="true"{{/if}}>
+                        {{#each ValidationErrors}}{{#if (eq Field "bgpAsn")}}<small class="field-error">{{Message}}</small>{{/if}}{{/each}}
+                    </label>
+                    <label>
+                        Listen Address
+                        <input type="text" name="bgpListenAddress" value="{{BGPServer.ListenAddress}}" placeholder="Optional; defaults to all WireGuard and ZeroTier addresses" {{#if (hasField ValidationErrors "bgpListenAddress")}}aria-invalid="true"{{/if}}>
+                        {{#each ValidationErrors}}{{#if (eq Field "bgpListenAddress")}}<small class="field-error">{{Message}}</small>{{/if}}{{/each}}
+                    </label>
+                    <label>
+                        Listen Port
+                        <input type="number" name="bgpListenPort" value="{{#if BGPServer.ListenPort}}{{BGPServer.ListenPort}}{{else}}179{{/if}}" min="1" max="65535" placeholder="179" {{#if (hasField ValidationErrors "bgpListenPort")}}aria-invalid="true"{{/if}}>
+                        {{#each ValidationErrors}}{{#if (eq Field "bgpListenPort")}}<small class="field-error">{{Message}}</small>{{/if}}{{/each}}
+                    </label>
+                </div>
+            </fieldset>
+            <button type="submit" class="btn btn-primary">Save BGP Settings</button>
+        </form>
+    </section>
 
-    {{> bgp-custom-peers CustomPeers}}
+    <div class="divider"></div>
+
+    <section class="config-section">
+        {{> bgp-custom-peers CustomPeers}}
+    </section>
+
+    <div class="divider"></div>
 
     <div id="bgp-live-stats">
         {{> bgp-live-stats BGPStats}}
@@ -950,17 +978,17 @@
     </article>
     {{else}}
     <div class="grid" style="margin-bottom: 2rem;">
-        <article>
+        <article class="stat-card">
             <header><strong>Router ID</strong></header>
-            {{routerId}}
+            <div>{{routerId}}</div>
         </article>
-        <article>
+        <article class="stat-card">
             <header><strong>Local ASN</strong></header>
-            {{asn}}
+            <div>{{asn}}</div>
         </article>
-        <article>
+        <article class="stat-card">
             <header><strong>Service Status</strong></header>
-            <span class="status-dot status-up"></span> Running
+            <div><span class="status-dot status-up"></span> Running</div>
         </article>
     </div>
 
