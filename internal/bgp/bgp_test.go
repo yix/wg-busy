@@ -387,3 +387,29 @@ func TestFailedKernelInitializationLeavesBGPStoppedAndRetryable(t *testing.T) {
 		t.Fatal("second Configure did not retry kernel initialization")
 	}
 }
+
+func TestBGPPeerNamesResolvedFromConfig(t *testing.T) {
+	mu.Lock()
+	originalActive, originalCache := active, statsCache
+	active = &bgpRuntime{
+		peerNames: map[string]string{
+			"10.0.0.2": "Alice WireGuard",
+			"10.0.0.3": "Custom Route Reflector",
+		},
+	}
+	statsCache = bgpStatsCache{}
+	mu.Unlock()
+	t.Cleanup(func() {
+		mu.Lock()
+		active, statsCache = originalActive, originalCache
+		mu.Unlock()
+	})
+
+	if active.peerNames["10.0.0.2"] != "Alice WireGuard" {
+		t.Fatalf("expected Alice WireGuard, got %s", active.peerNames["10.0.0.2"])
+	}
+	if active.peerNames["10.0.0.3"] != "Custom Route Reflector" {
+		t.Fatalf("expected Custom Route Reflector, got %s", active.peerNames["10.0.0.3"])
+	}
+}
+

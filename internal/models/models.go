@@ -241,6 +241,7 @@ type BGPRoute struct {
 
 // BGPPeerStats holds statistics, received and advertised prefixes for a single BGP peer.
 type BGPPeerStats struct {
+	Name             string     `json:"name,omitempty"`
 	IP               string     `json:"ip"`
 	ASN              uint32     `json:"asn"`
 	State            string     `json:"state"`

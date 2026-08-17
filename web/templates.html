@@ -770,7 +770,7 @@
 <script type="text/x-handlebars-template" id="bgp-custom-peers-template">
 <div id="bgp-custom-peers-list" {{#if OOB}}hx-swap-oob="true"{{/if}}>
     <div class="header-row">
-        <h3>Custom BGP Peers</h3>
+        <h3>Custom peers</h3>
         <button class="btn btn-primary" style="width:auto" hx-get="bgp/peers/new" hx-target="#modal-container" hx-swap="innerHTML">+ Add Peer</button>
     </div>
     {{#unless Peers}}
@@ -992,14 +992,14 @@
         </article>
     </div>
 
-    <h3>BGP Peers</h3>
+    <h3>Sessions</h3>
     {{#unless peers}}
-    <p>No BGP peers configured.</p>
+    <p>No active BGP sessions.</p>
     {{else}}
     {{#each peers}}
     <article>
         <header class="flex-row">
-            <strong>{{ip}} (AS{{asn}})</strong>
+            <strong>{{#if name}}{{name}} &mdash; {{/if}}{{ip}} (AS{{asn}})</strong>
             <span>
                 {{#if (eq state "Established")}}
                 <span class="status-dot status-up"></span> {{state}} &middot; Uptime: {{uptime}}

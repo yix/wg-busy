@@ -187,7 +187,13 @@ func collectBGPStatsLocked() *models.BGPStats {
 			pm.UpdatesReceived, pm.UpdatesSent,
 			len(pm.AddressFamilies), totalRoutesReceived, totalRoutesSent, pm.Since)
 
+		var name string
+		if active != nil && active.peerNames != nil {
+			name = active.peerNames[pm.IP.String()]
+		}
+
 		peerStat := models.BGPPeerStats{
+			Name:             name,
 			IP:               pm.IP.String(),
 			ASN:              pm.ASN,
 			State:            stateStr,

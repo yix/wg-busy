@@ -64,6 +64,7 @@ type bgpRuntime struct {
 	listeners   *listenerManager
 	state       bgpServerState
 	localRoutes map[string]localRoute
+	peerNames   map[string]string
 }
 
 type localRoute struct {
@@ -427,6 +428,7 @@ func startRuntime(cfg *models.AppConfig, state bgpServerState) (*bgpRuntime, err
 		listeners:   listeners,
 		state:       state,
 		localRoutes: make(map[string]localRoute),
+		peerNames:   make(map[string]string),
 	}
 	runtime.server.SetListenerManager(listeners)
 	if err := applyRuntimeConfig(runtime, cfg); err != nil {
@@ -640,6 +642,27 @@ func applyRuntimeConfig(runtime *bgpRuntime, cfg *models.AppConfig) error {
 	if err := reconcilePeers(runtime, cfg, prefixes); err != nil {
 		return err
 	}
+
+	peerNames := make(map[string]string)
+	for _, p := range cfg.Peers {
+		if p.BGPEnabled && p.Enabled && p.BGPPeerIP != "" {
+			if ip, err := bnet.IPFromString(p.BGPPeerIP); err == nil {
+				peerNames[ip.String()] = p.Name
+			} else {
+				peerNames[p.BGPPeerIP] = p.Name
+			}
+		}
+	}
+	for _, p := range cfg.BGPPeers {
+		if p.Enabled && p.PeerIP != "" {
+			if ip, err := bnet.IPFromString(p.PeerIP); err == nil {
+				peerNames[ip.String()] = p.Name
+			} else {
+				peerNames[p.PeerIP] = p.Name
+			}
+		}
+	}
+	runtime.peerNames = peerNames
 
 	// Install new routes only after every opted-out peer has its deny policy.
 	for _, prefix := range prefixes {
