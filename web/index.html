@@ -3,7 +3,7 @@
 
 <head>
     <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
     <title>WG Busy - WireGuard Manager</title>
     <link rel="icon" href="favicon.ico" sizes="16x16 32x32 48x48">
     <link rel="stylesheet" href="index.css">
@@ -13,13 +13,13 @@
 
 <body>
     <main class="container">
-        <hgroup class="flex-row">
+        <hgroup class="flex-row app-header">
             <div>
                 <h1>WG Busy</h1>
                 <p>WireGuard Server Manager <span class="app-version">(<span hx-get="version" hx-trigger="templates-ready from:body" hx-swap="innerHTML">dev</span>)</span></p>
             </div>
-            <button class="btn btn-outline secondary" onclick="toggleTheme()" id="theme-toggle" aria-label="Toggle Theme" title="Toggle Theme">
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <button class="btn btn-outline secondary theme-toggle-btn" onclick="toggleTheme()" id="theme-toggle" aria-label="Toggle Theme" title="Toggle Theme">
+                <svg class="sun-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                     <circle cx="12" cy="12" r="5"></circle>
                     <line x1="12" y1="1" x2="12" y2="3"></line>
                     <line x1="12" y1="21" x2="12" y2="23"></line>
@@ -29,6 +29,9 @@
                     <line x1="21" y1="12" x2="23" y2="12"></line>
                     <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
                     <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
+                </svg>
+                <svg class="moon-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
                 </svg>
             </button>
         </hgroup>
@@ -84,6 +87,20 @@
             localStorage.setItem('theme', next);
         }
         initTheme();
+
+        function copyText(text, btn) {
+            if (!navigator.clipboard) return;
+            navigator.clipboard.writeText(text).then(function() {
+                if (!btn) return;
+                var origText = btn.getAttribute('data-tooltip') || btn.title || '';
+                btn.classList.add('copied');
+                setTimeout(function() {
+                    btn.classList.remove('copied');
+                }, 1500);
+            }).catch(function(err) {
+                console.error('Failed to copy text: ', err);
+            });
+        }
 
         function selectTab(btn) {
             document.querySelectorAll('.tabs button').forEach(function (b) {

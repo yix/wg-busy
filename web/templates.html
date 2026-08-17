@@ -140,11 +140,11 @@
     <article>
         <header class="flex-row">
             <p class="mb-0"><strong>QR Code &mdash; {{Name}}</strong></p>
-            <button aria-label="Close" class="btn btn-outline secondary mb-0" style="padding: 0.1rem 0.6rem" onclick="closeModal()">X</button>
+            <button aria-label="Close" class="btn btn-outline secondary mb-0" style="padding: 0.2rem 0.6rem; min-height: 32px;" onclick="closeModal()">✕</button>
         </header>
         <div style="text-align:center">
             <img src="api/peers/{{ID}}/qr" alt="QR Code for {{Name}}" width="256" height="256"
-                 style="image-rendering:pixelated">
+                 style="image-rendering:pixelated; max-width: 100%; height: auto;">
             <p><small>Scan with the WireGuard mobile app to import this peer configuration.</small></p>
         </div>
         <footer>
@@ -159,7 +159,7 @@
     <article>
         <header class="flex-row">
             <p class="mb-0"><strong>{{#if IsNew}}Add Peer{{else}}Edit Peer{{/if}}</strong></p>
-            <button aria-label="Close" class="btn btn-outline secondary mb-0" style="padding: 0.1rem 0.6rem" onclick="closeModal()">X</button>
+            <button aria-label="Close" class="btn btn-outline secondary mb-0" style="padding: 0.2rem 0.6rem; min-height: 32px;" onclick="closeModal()">✕</button>
         </header>
         <form {{#if IsNew}}hx-post="peers"{{else}}hx-put="peers/{{Peer.ID}}"{{/if}}
               hx-target="#modal-container" hx-swap="innerHTML">
@@ -497,7 +497,10 @@
         <details>
             <summary>Server Private Key</summary>
             <p><small>Changing this will break all existing peer connections.</small></p>
-            <code style="word-break:break-all;">{{Server.PrivateKey}}</code>
+            <div style="display:flex; align-items:center; gap:0.5rem; flex-wrap:wrap;">
+                <code style="word-break:break-all;">{{Server.PrivateKey}}</code>
+                <button type="button" class="btn btn-outline secondary copy-btn" title="Copy Private Key" onclick="copyText('{{Server.PrivateKey}}', this)">Copy</button>
+            </div>
         </details>
 
         <button type="submit" class="btn btn-primary">Save Configuration</button>
@@ -689,6 +692,7 @@
         
         <strong><small>Routes received from this network ({{len routes}})</small></strong>
         {{#if routes}}
+        <div class="table-responsive">
         <table role="grid">
             <thead><tr><th scope="col">Target</th><th scope="col">Via</th><th scope="col">Metric</th></tr></thead>
             <tbody>
@@ -701,6 +705,7 @@
             {{/each}}
             </tbody>
         </table>
+        </div>
         {{else}}
         <p><small class="text-muted">No routes pushed by this network.</small></p>
         {{/if}}
@@ -712,6 +717,7 @@
     {{#unless Peers}}
     <p>No peers known.</p>
     {{else}}
+    <div class="table-responsive">
     <table role="grid">
         <thead>
             <tr>
@@ -734,6 +740,7 @@
             {{/each}}
         </tbody>
     </table>
+    </div>
     <p><small class="text-muted">ZeroTier does not report per-peer byte counters; traffic is shown per network interface above.</small></p>
     {{/unless}}
 {{/unless}}
@@ -770,7 +777,7 @@
     <article>
         <header class="flex-row">
             <p class="mb-0"><strong>{{#if IsNew}}Add BGP Peer{{else}}Edit BGP Peer{{/if}}</strong></p>
-            <button aria-label="Close" class="btn btn-outline secondary mb-0" style="padding: 0.1rem 0.6rem" onclick="closeModal()">X</button>
+            <button aria-label="Close" class="btn btn-outline secondary mb-0" style="padding: 0.2rem 0.6rem; min-height: 32px;" onclick="closeModal()">✕</button>
         </header>
         <form {{#if IsNew}}hx-post="bgp/peers"{{else}}hx-put="bgp/peers/{{Peer.ID}}"{{/if}}
               hx-target="#modal-container" hx-swap="innerHTML">
@@ -979,6 +986,7 @@
         {{#if routes}}
         <details data-route-key="{{ip}}-received">
             <summary><strong><small>Received routes ({{len routes}})</small></strong></summary>
+            <div class="table-responsive">
             <table role="grid">
                 <thead>
                     <tr>
@@ -1004,6 +1012,7 @@
                     {{/each}}
                 </tbody>
             </table>
+            </div>
             {{#if (gt (len routes) 10)}}
             <button class="btn btn-outline secondary show-all-btn" onclick="showAllRoutes(this)">Show All {{len routes}} Routes</button>
             {{/if}}
@@ -1013,6 +1022,7 @@
         {{#if advertisedRoutes}}
         <details data-route-key="{{ip}}-advertised">
             <summary><strong><small>Advertised routes ({{len advertisedRoutes}})</small></strong></summary>
+            <div class="table-responsive">
             <table role="grid">
                 <thead>
                     <tr>
@@ -1035,6 +1045,7 @@
                     {{/each}}
                 </tbody>
             </table>
+            </div>
             {{#if (gt (len advertisedRoutes) 10)}}
             <button class="btn btn-outline secondary show-all-btn" onclick="showAllRoutes(this)">Show All {{len advertisedRoutes}} Routes</button>
             {{/if}}
