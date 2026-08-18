@@ -216,19 +216,38 @@ func TestRouterHonorsDisabledGzipAndEmptyResponses(t *testing.T) {
 	}
 }
 
-func TestStatsPollingPausesWhilePageIsHidden(t *testing.T) {
+func TestActivityPausesWhenPageUnfocusedOrHidden(t *testing.T) {
 	source, err := os.ReadFile("../../web/index.html")
 	if err != nil {
 		t.Fatal(err)
 	}
 	body := string(source)
-	for _, trigger := range []string{
-		`every 2s [document.visibilityState === 'visible']`,
-		`visibilitychange from:document [document.visibilityState === 'visible']`,
+	for _, required := range []string{
+		"isPageActive",
+		"document.visibilityState === 'visible'",
+		"document.hasFocus",
+		"window.addEventListener('focus'",
+		"window.addEventListener('blur'",
+		"document.addEventListener('visibilitychange'",
+		"window.addEventListener('pageshow'",
+		"window.addEventListener('pagehide'",
+		"page-unfocused",
+		"stopStatsPolling",
+		"startStatsPolling",
+		"htmx:beforeRequest",
 	} {
-		if !strings.Contains(body, trigger) {
-			t.Fatalf("stats trigger is missing %q", trigger)
+		if !strings.Contains(body, required) {
+			t.Fatalf("index.html is missing energy conservation requirement %q", required)
 		}
+	}
+
+	cssSource, err := os.ReadFile("../../web/index.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cssBody := string(cssSource)
+	if !strings.Contains(cssBody, "html.page-unfocused") || !strings.Contains(cssBody, "animation-play-state: paused") {
+		t.Fatal("index.css missing animation-play-state paused rule for html.page-unfocused")
 	}
 }
 

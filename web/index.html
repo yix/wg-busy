@@ -38,7 +38,7 @@
 
         <input type="hidden" id="active-stats-kind" name="kind" value="peers">
         <div id="stats-bar" class="stats-bar" hx-get="stats" hx-include="#active-stats-kind"
-             hx-trigger="templates-ready from:body, every 2s [document.visibilityState === 'visible'], visibilitychange from:document [document.visibilityState === 'visible']"
+             hx-trigger="templates-ready from:body, stats-refresh"
              hx-swap="innerHTML">
         </div>
 
@@ -137,7 +137,102 @@
             });
             btn.classList.add('active');
             document.getElementById('active-stats-kind').value = btn.dataset.statsKind;
+
+            if (btn.dataset.statsKind !== 'zerotier' && activeZtXhr) {
+                activeZtXhr._abortedForUnfocus = true;
+                activeZtXhr.abort();
+                activeZtXhr = null;
+                ztRepollPending = false;
+            }
         }
+
+        // Energy-saving page lifecycle & focus management
+        // Halts all polling, network activity, long polls, and CSS animations when the page is not in focus.
+        var statsTimer = null;
+        var activeZtXhr = null;
+        var ztRepollPending = false;
+        var templatesLoaded = false;
+
+        function isPageActive() {
+            return document.visibilityState === 'visible' && (typeof document.hasFocus !== 'function' || document.hasFocus());
+        }
+
+        function triggerStatsPoll() {
+            if (!isPageActive() || !templatesLoaded) return;
+            var statsBar = document.getElementById('stats-bar');
+            if (statsBar) {
+                htmx.trigger(statsBar, 'stats-refresh');
+            }
+        }
+
+        function startStatsPolling() {
+            if (statsTimer) return;
+            triggerStatsPoll();
+            statsTimer = setInterval(triggerStatsPoll, 2000);
+        }
+
+        function stopStatsPolling() {
+            if (statsTimer) {
+                clearInterval(statsTimer);
+                statsTimer = null;
+            }
+        }
+
+        function updateActivityState() {
+            var active = isPageActive();
+            document.documentElement.classList.toggle('page-unfocused', !active);
+
+            if (active) {
+                if (templatesLoaded) {
+                    startStatsPolling();
+                    var ztStatus = document.getElementById('zerotier-status');
+                    if (ztStatus && (ztRepollPending || !activeZtXhr)) {
+                        ztRepollPending = false;
+                        htmx.trigger(document.body, 'zerotier-repoll');
+                    }
+                }
+            } else {
+                stopStatsPolling();
+                if (activeZtXhr) {
+                    activeZtXhr._abortedForUnfocus = true;
+                    activeZtXhr.abort();
+                    activeZtXhr = null;
+                    ztRepollPending = true;
+                }
+            }
+        }
+
+        window.addEventListener('focus', updateActivityState);
+        window.addEventListener('blur', updateActivityState);
+        document.addEventListener('visibilitychange', updateActivityState);
+        window.addEventListener('pageshow', updateActivityState);
+        window.addEventListener('pagehide', updateActivityState);
+
+        document.body.addEventListener('htmx:beforeRequest', function (evt) {
+            var path = (evt.detail.requestConfig && evt.detail.requestConfig.path) || '';
+            var target = evt.detail.target;
+            var isZtStatus = (target && target.id === 'zerotier-status') || path.indexOf('zerotier/status') !== -1;
+            var isStatsPoll = (target && target.id === 'stats-bar') || path.indexOf('stats') === 0;
+
+            // Block automated background polling if page is not active
+            if (!isPageActive() && (isZtStatus || isStatsPoll)) {
+                if (isZtStatus) {
+                    ztRepollPending = true;
+                }
+                evt.preventDefault();
+                return;
+            }
+
+            if (isZtStatus) {
+                activeZtXhr = evt.detail.xhr;
+            }
+        });
+
+        document.body.addEventListener('htmx:afterRequest', function (evt) {
+            if (activeZtXhr && evt.detail.xhr === activeZtXhr) {
+                activeZtXhr = null;
+            }
+        });
 
         var renderPageResponse;
 
@@ -202,13 +297,16 @@
 
         document.body.addEventListener('htmx:responseError', function (evt) {
             var xhr = evt.detail.xhr;
+            if (xhr && xhr._abortedForUnfocus) return;
             var body = (xhr.responseText || '').trim();
             // Only plain-text bodies (http.Error) are safe/useful to show verbatim.
             var isText = (xhr.getResponseHeader('Content-Type') || '').indexOf('text/plain') === 0;
             showToast(isText && body ? body : 'Request failed (' + xhr.status + ' ' + xhr.statusText + ')');
         });
 
-        document.body.addEventListener('htmx:sendError', function () {
+        document.body.addEventListener('htmx:sendError', function (evt) {
+            var xhr = evt && evt.detail && evt.detail.xhr;
+            if (xhr && xhr._abortedForUnfocus) return;
             showToast('Could not reach the server. Check your connection.');
         });
 
@@ -328,7 +426,11 @@
             host.innerHTML = markup;
             document.body.appendChild(host);
             registerHandlebars();
-            setTimeout(function () { htmx.trigger(document.body, 'templates-ready'); });
+            templatesLoaded = true;
+            setTimeout(function () {
+                htmx.trigger(document.body, 'templates-ready');
+                updateActivityState();
+            });
         }).catch(function (err) {
             showToast('Could not load UI templates: ' + err.message);
         });

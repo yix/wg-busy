@@ -322,6 +322,13 @@ small {
   50% { transform: scale(1.15); opacity: 0.85; }
 }
 
+/* Energy conservation: pause all animations when window or page is not in focus */
+html.page-unfocused *,
+html.page-unfocused *::before,
+html.page-unfocused *::after {
+  animation-play-state: paused !important;
+}
+
 .stats-transfer {
   display: flex;
   align-items: center;
