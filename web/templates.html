@@ -65,7 +65,7 @@
     <span class="stats-sparkline">{{{SparklineSVG}}}</span>
 </div>
 {{#each Peers}}
-<small id="peer-stats-{{ID}}" hx-swap-oob="true">{{> peer-stats this}}</small>
+<small id="peer-stats-{{ID}}" class="peer-stats" hx-swap-oob="true">{{> peer-stats this}}</small>
 {{/each}}
 {{#if BGPStats}}
 <div id="bgp-live-stats" hx-swap-oob="true">{{> bgp-live-stats BGPStats}}</div>
@@ -98,7 +98,7 @@
             {{#if Peer.StrictPolicyRouting}}<span class="badge badge-warn" title="Traffic may only use this peer's own routes">Strict</span>{{/if}}
         </strong>
         {{#if Endpoint}}<div style="font-size:0.8em;font-weight:normal;opacity:0.7;margin-top:0.1em">({{Endpoint}})</div>{{/if}}
-        <small id="peer-stats-{{Peer.ID}}">
+        <small id="peer-stats-{{Peer.ID}}" class="peer-stats">
            {{> peer-stats this}}
         </small>
     </div>
@@ -127,10 +127,12 @@
 </script>
 
 <script type="text/x-handlebars-template" id="peer-stats-template">
-    {{AllowedIPs}}
-    {{#if HasStats}} &middot; <span class="stats-rx">&darr;{{CurrentRxPS}} <small class="text-muted">({{TransferRx}})</small></span> <span class="stats-tx">&uarr;{{CurrentTxPS}} <small class="text-muted">({{TransferTx}})</small></span>{{/if}}
-    {{#unless HasStats}} &middot; Created {{formatTime CreatedAt}}{{/unless}}
-    &middot; last seen {{#if LastSeenAt}}<time datetime="{{LastSeenAt}}" title="{{LastSeenAt}}">{{LastSeen}}</time>{{else}}never{{/if}}
+    <span class="peer-stats-text">
+        {{AllowedIPs}}
+        {{#if HasStats}} &middot; <span class="stats-rx">&darr;{{CurrentRxPS}} <small class="text-muted">({{TransferRx}})</small></span> <span class="stats-tx">&uarr;{{CurrentTxPS}} <small class="text-muted">({{TransferTx}})</small></span>{{/if}}
+        {{#unless HasStats}} &middot; Created {{formatTime CreatedAt}}{{/unless}}
+        &middot; last seen {{#if LastSeenAt}}<time datetime="{{LastSeenAt}}" title="{{LastSeenAt}}">{{LastSeen}}</time>{{else}}never{{/if}}
+    </span>
     {{#if HasStats}} <span class="peer-sparkline">{{{SparklineSVG}}}</span>{{/if}}
 </script>
 

@@ -356,9 +356,9 @@ html.page-unfocused *::after {
 }
 
 .peer-sparkline {
-  display: inline-block;
-  vertical-align: middle;
-  margin-left: 0.4rem;
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
   line-height: 0;
 }
 
@@ -915,6 +915,22 @@ dialog article footer {
   font-size: 1.05rem;
   gap: 0.5rem;
   flex-wrap: wrap;
+}
+
+.peer-stats,
+.peer-info > small {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  min-width: 0;
+  white-space: nowrap;
+}
+
+.peer-stats-text {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
 }
 
 .peer-actions {

@@ -138,7 +138,40 @@ func TestPeerLastSeenUsesNewestTimestampAndExactHoverText(t *testing.T) {
 	}
 }
 
+func TestPeerStatsLayoutPreventsSparklineWrapping(t *testing.T) {
+	templateSource, err := os.ReadFile("../../web/templates.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	templateBody := string(templateSource)
+	for _, required := range []string{
+		`id="peer-stats-{{Peer.ID}}" class="peer-stats"`,
+		`id="peer-stats-{{ID}}" class="peer-stats" hx-swap-oob="true"`,
+		`<span class="peer-stats-text">`,
+		`<span class="peer-sparkline">{{{SparklineSVG}}}</span>`,
+	} {
+		if !strings.Contains(templateBody, required) {
+			t.Fatalf("templates.html is missing sparkline wrap protection markup: %q", required)
+		}
+	}
 
+	cssSource, err := os.ReadFile("../../web/index.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cssBody := string(cssSource)
+	for _, required := range []string{
+		".peer-stats",
+		".peer-stats-text",
+		".peer-sparkline",
+		"white-space: nowrap",
+		"flex-shrink: 0",
+	} {
+		if !strings.Contains(cssBody, required) {
+			t.Fatalf("index.css is missing sparkline wrap protection rule: %q", required)
+		}
+	}
+}
 
 func TestVersionEndpointReturnsBuildVersion(t *testing.T) {
 	router := NewRouter(nil, fstest.MapFS{"index.html": {Data: []byte("ok")}}, nil, nil, "v0.0.1")
