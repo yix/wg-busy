@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/yix/wg-busy/internal/models"
+	"github.com/yix/wg-busy/internal/wireguard"
 )
 
 // serverFormData is the template data for the server config form.
@@ -82,3 +83,28 @@ func (h *handler) UpdateServerConfig(w http.ResponseWriter, r *http.Request) {
 	data.Success = "Configuration saved successfully."
 	writePageJSON(w, http.StatusOK, "server-config", data, nil)
 }
+
+// wgShowModalData is the template data for the wg show popup dialog.
+type wgShowModalData struct {
+	Output string
+	Error  string
+}
+
+// ShowWGStatus handles GET /server/show.
+func (h *handler) ShowWGStatus(w http.ResponseWriter, r *http.Request) {
+	var peers []models.Peer
+	h.store.Read(func(cfg *models.AppConfig) {
+		peers = append([]models.Peer(nil), cfg.Peers...)
+	})
+
+	output, err := wireguard.ShowWG(peers)
+	var data wgShowModalData
+	if err != nil {
+		data.Error = err.Error()
+	} else {
+		data.Output = output
+	}
+
+	writePageJSON(w, http.StatusOK, "wg-show-modal", data, nil)
+}
+

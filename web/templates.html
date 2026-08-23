@@ -155,6 +155,29 @@
 </dialog>
 </script>
 
+<script type="text/x-handlebars-template" id="wg-show-modal-template">
+<dialog>
+    <article>
+        <header class="flex-row">
+            <p class="mb-0"><strong>WireGuard Status &mdash; <code>wg show</code></strong></p>
+            <button aria-label="Close" class="btn btn-outline secondary mb-0" style="padding: 0.2rem 0.6rem; min-height: 32px;" onclick="closeModal()">✕</button>
+        </header>
+        <div>
+            {{#if Error}}
+            <div class="toast toast-error" role="alert">{{Error}}</div>
+            {{else if Output}}
+            <pre style="margin: 0; padding: 1rem; background: var(--bg-subtle); border: 1px solid var(--border-color); border-radius: var(--border-radius); overflow-x: auto; font-family: var(--font-mono); font-size: 0.88em; line-height: 1.45; white-space: pre-wrap; word-break: break-all;"><code>{{Output}}</code></pre>
+            {{else}}
+            <p><small class="text-muted">No WireGuard status output.</small></p>
+            {{/if}}
+        </div>
+        <footer>
+            <button type="button" class="btn btn-secondary" onclick="closeModal()">Close</button>
+        </footer>
+    </article>
+</dialog>
+</script>
+
 <script type="text/x-handlebars-template" id="peer-form-template">
 <dialog>
     <article>
@@ -314,6 +337,7 @@
         <h2>Server Configuration</h2>
         <div class="btn-group">
             <a href="api/server/config" download role="button" class="btn btn-outline secondary">Download wg0.conf</a>
+            <button class="btn btn-outline secondary" hx-get="server/show" hx-target="#modal-container" hx-swap="innerHTML">wg show</button>
             <button class="btn btn-primary" hx-post="api/server/apply" hx-target="#apply-result" hx-swap="innerHTML"
                     hx-confirm="Apply configuration? This will restart the WireGuard interface.">
                 Apply Config

@@ -238,6 +238,7 @@ func NewRouter(store *config.Store, webFS fs.FS, stats *wgstats.Collector, zt *z
 	// Server config fragment endpoints.
 	mux.HandleFunc("GET /server", h.GetServerConfig)
 	mux.HandleFunc("PUT /server", h.UpdateServerConfig)
+	mux.HandleFunc("GET /server/show", h.ShowWGStatus)
 
 	// BGP tab; live data is refreshed through the active-tab /stats request.
 	mux.HandleFunc("GET /bgp/stats", h.GetBGPStatsTab)

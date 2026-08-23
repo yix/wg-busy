@@ -183,3 +183,97 @@ func TestRenderServerConfigSplitsMultilineHooks(t *testing.T) {
 		t.Fatalf("rendered hooks:\n%s\nwant contiguous block:\n%s", got, want)
 	}
 }
+
+func TestFormatWGShow(t *testing.T) {
+	raw := `interface: wg0
+  public key: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
+  private key: (hidden)
+  listening port: 51820
+
+peer: BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB=
+  preshared key: (hidden)
+  endpoint: 198.51.100.1:51820
+  allowed ips: 10.0.0.2/32
+  latest handshake: 1 minute, 23 seconds ago
+  transfer: 1.23 KiB received, 4.56 KiB sent
+
+peer: CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC=
+  endpoint: 198.51.100.2:51820
+  allowed ips: 10.0.0.3/32
+
+peer: DDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDD=
+  allowed ips: 10.0.0.4/32
+`
+	peers := []models.Peer{
+		{Name: "Alice", PublicKey: "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB="},
+		{Name: "Bob", PublicKey: "CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC="},
+		// DDD... has no matching peer name
+	}
+
+	want := `interface: wg0
+  public key: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
+  private key: (hidden)
+  listening port: 51820
+
+# Alice
+peer: BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB=
+  preshared key: (hidden)
+  endpoint: 198.51.100.1:51820
+  allowed ips: 10.0.0.2/32
+  latest handshake: 1 minute, 23 seconds ago
+  transfer: 1.23 KiB received, 4.56 KiB sent
+
+# Bob
+peer: CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC=
+  endpoint: 198.51.100.2:51820
+  allowed ips: 10.0.0.3/32
+
+peer: DDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDD=
+  allowed ips: 10.0.0.4/32
+`
+
+	got := FormatWGShow(raw, peers)
+	if got != want {
+		t.Fatalf("FormatWGShow() mismatch.\nGot:\n%s\nWant:\n%s", got, want)
+	}
+}
+
+func TestShowWGCallsCommandAndFormats(t *testing.T) {
+	original := runCommand
+	t.Cleanup(func() { runCommand = original })
+
+	var calledName string
+	var calledArgs []string
+	runCommand = func(name string, args []string, _ []byte) ([]byte, error) {
+		calledName = name
+		calledArgs = args
+		return []byte("interface: wg0\n\npeer: KEY1=\n  allowed ips: 10.0.0.2/32\n"), nil
+	}
+
+	peers := []models.Peer{{Name: "Alice", PublicKey: "KEY1="}}
+	got, err := ShowWG(peers)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if calledName != "wg" || len(calledArgs) != 1 || calledArgs[0] != "show" {
+		t.Fatalf("called command = %s %v, want wg [show]", calledName, calledArgs)
+	}
+	want := "interface: wg0\n\n# Alice\npeer: KEY1=\n  allowed ips: 10.0.0.2/32\n"
+	if got != want {
+		t.Fatalf("ShowWG() = %q, want %q", got, want)
+	}
+}
+
+func TestShowWGErrorHandling(t *testing.T) {
+	original := runCommand
+	t.Cleanup(func() { runCommand = original })
+
+	runCommand = func(name string, args []string, _ []byte) ([]byte, error) {
+		return []byte("Unable to access interface: No such device"), errors.New("exit status 1")
+	}
+
+	_, err := ShowWG(nil)
+	if err == nil || !strings.Contains(err.Error(), "Unable to access interface") {
+		t.Fatalf("ShowWG() error = %v, want device error", err)
+	}
+}

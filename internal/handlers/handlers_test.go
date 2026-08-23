@@ -17,6 +17,7 @@ import (
 	"github.com/yix/wg-busy/internal/config"
 	"github.com/yix/wg-busy/internal/models"
 	"github.com/yix/wg-busy/internal/wgstats"
+	"github.com/yix/wg-busy/internal/wireguard"
 	"github.com/yix/wg-busy/internal/zerotier"
 )
 
@@ -397,3 +398,120 @@ func TestZeroTierLongPollReturnsNoDuplicatePayloadWhenCanceled(t *testing.T) {
 		t.Fatalf("HX-Trigger = %q, want zerotier-repoll", got)
 	}
 }
+
+func TestShowWGStatusHandler(t *testing.T) {
+	dir := t.TempDir()
+	configPath := dir + "/config.yaml"
+	if err := os.WriteFile(configPath, []byte(`server:
+  privateKey: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
+  listenPort: 51820
+  address: 10.0.0.1/24
+peers:
+  - id: peer-1
+    name: Alice
+    publicKey: KEYALICE=
+    allowedIPs: 10.0.0.2/32
+`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	store, err := config.Load(configPath, dir+"/wg0.conf")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	restore := wireguard.SetRunCommandForTesting(func(name string, args []string, _ []byte) ([]byte, error) {
+		return []byte("interface: wg0\n  public key: SERVERKEY=\n\npeer: KEYALICE=\n  endpoint: 1.2.3.4:51820\n"), nil
+	})
+	t.Cleanup(restore)
+
+	router := NewRouter(store, fstest.MapFS{"index.html": {Data: []byte("ok")}}, nil, nil, "v0.0.1")
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, httptest.NewRequest("GET", "/server/show", nil))
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", recorder.Code)
+	}
+
+	var resp struct {
+		Template string
+		Data     struct {
+			Output string
+			Error  string
+		}
+	}
+	if err := json.NewDecoder(recorder.Body).Decode(&resp); err != nil {
+		t.Fatal(err)
+	}
+
+	if resp.Template != "wg-show-modal" {
+		t.Fatalf("Template = %q, want wg-show-modal", resp.Template)
+	}
+	if resp.Data.Error != "" {
+		t.Fatalf("unexpected error = %q", resp.Data.Error)
+	}
+	want := "interface: wg0\n  public key: SERVERKEY=\n\n# Alice\npeer: KEYALICE=\n  endpoint: 1.2.3.4:51820\n"
+	if resp.Data.Output != want {
+		t.Fatalf("Output = %q, want %q", resp.Data.Output, want)
+	}
+}
+
+func TestServerTabIncludesWGShowButton(t *testing.T) {
+	templateSource, err := os.ReadFile("../../web/templates.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := string(templateSource)
+
+	serverStart := strings.Index(source, `id="server-config-template"`)
+	if serverStart < 0 {
+		t.Fatal("server-config-template not found")
+	}
+	serverEnd := strings.Index(source[serverStart:], "</script>")
+	if serverEnd < 0 {
+		t.Fatal("server-config-template not closed")
+	}
+	serverTemplate := source[serverStart : serverStart+serverEnd]
+
+	// Must contain the button targeting modal-container with hx-get="server/show"
+	buttonHTML := `<button class="btn btn-outline secondary" hx-get="server/show" hx-target="#modal-container" hx-swap="innerHTML">wg show</button>`
+	if !strings.Contains(serverTemplate, buttonHTML) {
+		t.Fatalf("server-config-template does not contain expected wg show button: %s", serverTemplate)
+	}
+
+	// Must be placed to the left of the "Apply Config" button
+	btnIdx := strings.Index(serverTemplate, `hx-get="server/show"`)
+	applyIdx := strings.Index(serverTemplate, `Apply Config`)
+	if btnIdx < 0 || applyIdx < 0 || btnIdx >= applyIdx {
+		t.Fatalf("wg show button is not to the left of Apply Config (btnIdx=%d, applyIdx=%d)", btnIdx, applyIdx)
+	}
+}
+
+func TestWGShowModalTemplate(t *testing.T) {
+	templateSource, err := os.ReadFile("../../web/templates.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := string(templateSource)
+
+	modalStart := strings.Index(source, `id="wg-show-modal-template"`)
+	if modalStart < 0 {
+		t.Fatal("wg-show-modal-template not found in templates.html")
+	}
+	modalEnd := strings.Index(source[modalStart:], "</script>")
+	if modalEnd < 0 {
+		t.Fatal("wg-show-modal-template not closed")
+	}
+	modalTemplate := source[modalStart : modalStart+modalEnd]
+
+	for _, required := range []string{
+		"<dialog>",
+		"closeModal()",
+		"{{#if Error}}",
+		"{{Output}}",
+	} {
+		if !strings.Contains(modalTemplate, required) {
+			t.Fatalf("wg-show-modal-template is missing required element: %q", required)
+		}
+	}
+}
+

@@ -27,6 +27,13 @@ var runCommand = func(name string, args []string, stdin []byte) ([]byte, error) 
 	return cmd.CombinedOutput()
 }
 
+// SetRunCommandForTesting overrides runCommand for unit testing.
+func SetRunCommandForTesting(fn func(name string, args []string, stdin []byte) ([]byte, error)) func() {
+	prev := runCommand
+	runCommand = fn
+	return func() { runCommand = prev }
+}
+
 // Gracefully reload WireGuard server configuration
 // ReloadWGConfig gracefully reloads WireGuard server configuration.
 // It checks if the interface exists before attempting reload to avoid errors during startup.
@@ -63,6 +70,45 @@ func RestartWGConfig(configPath string) error {
 		return fmt.Errorf("bringing up WireGuard config %q: %w: %s", configPath, err, strings.TrimSpace(string(output)))
 	}
 	return nil
+}
+
+// ShowWG executes `wg show` and prepends each peer entry with its peer name comment (e.g. "# Alice").
+func ShowWG(peers []models.Peer) (string, error) {
+	out, err := runCommand("wg", []string{"show"}, nil)
+	if err != nil {
+		outStr := strings.TrimSpace(string(out))
+		if outStr != "" {
+			return "", fmt.Errorf("wg show: %w: %s", err, outStr)
+		}
+		return "", fmt.Errorf("wg show: %w", err)
+	}
+	return FormatWGShow(string(out), peers), nil
+}
+
+// FormatWGShow takes raw `wg show` output and inserts peer names as comments above peer entries.
+func FormatWGShow(raw string, peers []models.Peer) string {
+	names := make(map[string]string, len(peers))
+	for _, p := range peers {
+		key := strings.TrimSpace(p.PublicKey)
+		name := strings.TrimSpace(p.Name)
+		if key != "" && name != "" {
+			names[key] = name
+		}
+	}
+
+	lines := strings.Split(raw, "\n")
+	var out []string
+	for _, line := range lines {
+		trimmed := strings.TrimRight(line, "\r")
+		if strings.HasPrefix(trimmed, "peer: ") {
+			key := strings.TrimSpace(strings.TrimPrefix(trimmed, "peer: "))
+			if name, ok := names[key]; ok && name != "" {
+				out = append(out, "# "+name)
+			}
+		}
+		out = append(out, trimmed)
+	}
+	return strings.Join(out, "\n")
 }
 
 // ServerRestartReason names the wg-quick-owned fields that prevent syncconf
