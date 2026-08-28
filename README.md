@@ -1,6 +1,10 @@
 # WG-Busy
 
-> **Geek-friendly WireGuard server management with advanced routing capabilities.**
+<p align="center">
+  <img src="docs/wg-busy-logo.jpg" alt="WG-Busy Mascot Logo" width="340" />
+</p>
+
+ > **Geek-friendly WireGuard server management with advanced routing capabilities.**
 
 WG-Busy is a web-based UI for managing a WireGuard server. It is inspired by projects like wg-easy but designed for power users who need more control over their configuration and routing.
 

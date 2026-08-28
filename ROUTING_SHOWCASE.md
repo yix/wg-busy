@@ -2,11 +2,21 @@
 
 > **Visual guide and technical deep-dive into WG-Busy's policy routing, dynamic BGP routing, ZeroTier integration, and traffic management.**
 
-WG-Busy extends standard WireGuard server management with advanced Linux policy routing (`ip rule` and custom routing tables), dynamic dual-stack BGP routing via embedded `bio-rd`, and ZeroTier SDN integration. This document details each routing topology and packet flow supported by WG-Busy with GitHub-compatible Mermaid diagrams and technical specifications.
+![WG-Busy Core Features Overview](docs/wg-busy-routing-overview.jpg)
+
+### What Can WG-Busy Do? (At a Glance)
+
+WG-Busy serves as a powerful central hub for managing WireGuard VPNs with flexible traffic steering:
+
+* 🔒 **Secure WireGuard VPN**: Connect laptops, smartphones, and remote devices through high-speed encrypted tunnels.
+* 🌐 **WireGuard Exit Nodes**: Bounce any client's internet traffic through a designated exit node peer (e.g. a VPS in another region or country).
+* ⚡ **ZeroTier Mesh Integration**: Seamlessly route WireGuard clients into ZeroTier networks with automatic NAT masquerading.
+* 📡 **Simple BGP Dynamic Routing**: Automatically exchange and inject live network routes with hardware routers (Mikrotik, VyOS, Cisco) and Cloud VPCs.
+* 🎯 **Policy & Strict Routing**: Steer specific subnets to specific gateways per client, or lock down contractor peers so unauthorized traffic is safely dropped.
 
 ---
 
-## Master Architecture & Packet Flow Overview
+## Master Architecture & Detailed Packet Flow
 
 The diagram below illustrates how incoming packets on `wg0` traverse WG-Busy's priority-ordered Linux Policy Routing rules (`ip rule`), custom routing tables, BGP-injected kernel routes, ZeroTier interfaces, and egress gateways.
 

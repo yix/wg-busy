@@ -6,6 +6,8 @@ on:
     tags: ["v*.*.*"]
     paths-ignore:
       - '**.md'
+      - '**.jpg'
+      - '**.png'
       - '.github/**'
       - 'docs/**'
   pull_request:
