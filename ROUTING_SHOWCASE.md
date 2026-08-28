@@ -13,15 +13,15 @@ The diagram below illustrates how incoming packets on `wg0` traverse WG-Busy's p
 ```mermaid
 flowchart TD
     %% Styling
-    classDef client fill:#e1f5fe,stroke:#0288d1,stroke-width:2px,color:#01579b;
-    classDef engine fill:#ede7f6,stroke:#5e35b1,stroke-width:2px,color:#311b92;
-    classDef table fill:#fff3e0,stroke:#f57c00,stroke-width:2px,color:#e65100;
-    classDef egress fill:#e8f5e9,stroke:#388e3c,stroke-width:2px,color:#1b5e20;
-    classDef bgp fill:#fce4ec,stroke:#c2185b,stroke-width:2px,color:#880e4f;
-    classDef drop fill:#ffebee,stroke:#d32f2f,stroke-width:2px,color:#b71c1c;
+    classDef client fill:#e1f5fe,stroke:#0288d1,stroke-width:2px,color:#01579b
+    classDef engine fill:#ede7f6,stroke:#5e35b1,stroke-width:2px,color:#311b92
+    classDef table fill:#fff3e0,stroke:#f57c00,stroke-width:2px,color:#e65100
+    classDef egress fill:#e8f5e9,stroke:#388e3c,stroke-width:2px,color:#1b5e20
+    classDef bgp fill:#fce4ec,stroke:#c2185b,stroke-width:2px,color:#880e4f
+    classDef drop fill:#ffebee,stroke:#d32f2f,stroke-width:2px,color:#b71c1c
 
     %% Ingress Clients
-    subgraph Ingress["Ingress Peers (dev wg0)"]
+    subgraph Ingress ["Ingress Peers (dev wg0)"]
         P_REG["Peer A: Regular Client<br/>(10.0.0.2)"]:::client
         P_PARTIAL["Peer B: Partial Policy Client<br/>(10.0.0.3)"]:::client
         P_STRICT["Peer C: Strict Policy Client<br/>(10.0.0.4)"]:::client
@@ -29,7 +29,7 @@ flowchart TD
     end
 
     %% Linux Policy Routing Engine (ip rule)
-    subgraph PolicyEngine["Linux Policy Routing Engine (ip rule Evaluation)"]
+    subgraph PolicyEngine ["Linux Policy Routing Engine (ip rule Evaluation)"]
         direction TB
         R_START{"Packet Ingress<br/>Evaluate Source IP"}:::engine
         
@@ -42,32 +42,33 @@ flowchart TD
     end
 
     %% Routing Tables
-    subgraph RoutingTables["Kernel Routing Tables"]
-        T_EXIT["Table 100 (Exit Node Table)<br/>• default dev wg0<br/>(or split subnets dev wg0)"]:::table
-        T_POL_B["Table 101 (Peer B Policy Table)<br/>• 192.168.50.0/24 via 10.0.0.10 dev wg0<br/>• 172.16.0.0/16 via 10.147.17.50 dev zt0"]:::table
-        T_POL_C["Table 102 (Peer C Policy Table)<br/>• 10.200.0.0/16 via 10.0.0.20 dev wg0"]:::table
-        T_MAIN["Table main (Default / BGP FIB)<br/>• default via eth0 (Server Gateway)<br/>• 10.0.0.0/24 dev wg0<br/>• BGP learned routes (via bio-rd)"]:::table
+    subgraph RoutingTables ["Kernel Routing Tables"]
+        T_EXIT["Table 100 (Exit Node Table)<br/>- default dev wg0<br/>(or split subnets dev wg0)"]:::table
+        T_POL_B["Table 101 (Peer B Policy Table)<br/>- 192.168.50.0/24 via 10.0.0.10 dev wg0<br/>- 172.16.0.0/16 via 10.147.17.50 dev zt0"]:::table
+        T_POL_C["Table 102 (Peer C Policy Table)<br/>- 10.200.0.0/16 via 10.0.0.20 dev wg0"]:::table
+        T_MAIN["Table main (Default / BGP FIB)<br/>- default via eth0 (Server Gateway)<br/>- 10.0.0.0/24 dev wg0<br/>- BGP learned routes (via bio-rd)"]:::table
     end
 
     %% BGP Control Plane
-    subgraph BGPPlane["BGP Dynamic Routing (bio-rd)"]
+    subgraph BGPPlane ["BGP Dynamic Routing (bio-rd)"]
         BGP_PEER["Remote BGP Peer / Router"]:::bgp
-        BGP_FILTER{"BGP Route Filter Chain<br/>• Max Prefix Length<br/>• Exact / OrLonger match<br/>• Default Reject"}:::bgp
+        BGP_FILTER{"BGP Route Filter Chain<br/>- Max Prefix Length<br/>- Exact / OrLonger match<br/>- Default Reject"}:::bgp
         BGP_RIB["LocRIB / Kernel Client"]:::bgp
+        BGP_DROP["RIB Status: Filtered"]:::drop
         
         BGP_PEER -->|"BGP Update (Routes)"| BGP_FILTER
         BGP_FILTER -->|"Accepted Routes"| BGP_RIB
-        BGP_FILTER -.->|"Filtered / Dropped"| BGP_DROP["RIB Status: Filtered"]:::drop
+        BGP_FILTER -.->|"Filtered / Dropped"| BGP_DROP
         BGP_RIB -->|"Direct Kernel Injection"| T_MAIN
     end
 
     %% Egress & Forwarding
-    subgraph Egress["Egress Targets"]
+    subgraph Egress ["Egress Targets"]
         E_DEF["Server Default Gateway<br/>(Internet via eth0 + NAT)"]:::egress
         E_EXIT_NODE["Exit Node Peer (10.0.0.50)<br/>(dev wg0 -> Remote Internet)"]:::egress
         E_WG_PEER["WireGuard Peer Gateway<br/>(10.0.0.10 / 10.0.0.20 on wg0)"]:::egress
         
-        subgraph ZTEgress["ZeroTier Egress Pipeline"]
+        subgraph ZTEgress ["ZeroTier Egress Pipeline"]
             ZT_NAT["iptables NAT Masquerade<br/>-o zt+ -j MASQUERADE"]:::egress
             ZT_NET["ZeroTier Network Endpoint<br/>(10.147.17.50 dev zt0)"]:::egress
         end
@@ -172,24 +173,20 @@ A peer routes specific destination subnets through designated gateways (which ca
 
 ```mermaid
 flowchart TD
-    Client["Peer Traffic (Src: 10.0.0.3)"] --> PRule{"ip rule Priority 10000<br/>from 10.0.0.3 lookup table 101"}
-    
-    PRule --> Table101["Policy Table 101"]
-    
-    Table101 -->|"Dst in 192.168.50.0/24"| GW_WG["via 10.0.0.10 dev wg0<br/>(Branch Office WG Peer)"]
-    Table101 -->|"Dst in 172.16.0.0/16"| GW_ZT["via 10.147.17.50 dev zt0<br/>(ZeroTier Endpoint)"]
-    Table101 -->|"Unmatched Destination<br/>(e.g. 1.1.1.1)"| Fallthrough["Fallthrough to main Table<br/>(Priority 32766)"]
-    
-    Fallthrough --> DefaultGW["Server Default Gateway<br/>(eth0 / Internet)"]
+    classDef client fill:#e1f5fe,stroke:#0288d1,stroke-width:2px,color:#01579b
+    classDef rule fill:#ede7f6,stroke:#5e35b1,stroke-width:2px,color:#311b92
+    classDef gw fill:#e8f5e9,stroke:#388e3c,stroke-width:2px,color:#1b5e20
+    classDef fallback fill:#fff3e0,stroke:#f57c00,stroke-width:2px,color:#e65100
 
-    classDef client fill:#e1f5fe,stroke:#0288d1;
-    classDef rule fill:#ede7f6,stroke:#5e35b1;
-    classDef gw fill:#e8f5e9,stroke:#388e3c;
-    classDef def fill:#fff3e0,stroke:#f57c00;
-    class Client client;
-    class PRule rule;
-    class GW_WG,GW_ZT gw;
-    class Fallthrough,DefaultGW,Table101 def;
+    Client["Peer Traffic (Src: 10.0.0.3)"]:::client --> PRule{"ip rule Priority 10000<br/>from 10.0.0.3 lookup table 101"}:::rule
+    
+    PRule --> Table101["Policy Table 101"]:::fallback
+    
+    Table101 -->|"Dst in 192.168.50.0/24"| GW_WG["via 10.0.0.10 dev wg0<br/>(Branch Office WG Peer)"]:::gw
+    Table101 -->|"Dst in 172.16.0.0/16"| GW_ZT["via 10.147.17.50 dev zt0<br/>(ZeroTier Endpoint)"]:::gw
+    Table101 -->|"Unmatched Destination<br/>(e.g. 1.1.1.1)"| Fallthrough["Fallthrough to main Table<br/>(Priority 32766)"]:::fallback
+    
+    Fallthrough --> DefaultGW["Server Default Gateway<br/>(eth0 / Internet)"]:::fallback
 ```
 
 #### Generated System Commands
@@ -224,25 +221,19 @@ When a peer must be completely isolated to its assigned policy routes, **Strict 
 
 ```mermaid
 flowchart TD
-    Client["Peer Traffic (Src: 10.0.0.4)"] --> R1{"ip rule Priority 10000<br/>from 10.0.0.4 lookup table 102"}
-    
-    R1 -->|"Lookup Table 102"| Table102["Policy Table 102<br/>• 10.200.0.0/16 via 10.0.0.20 dev wg0"]
-    
-    Table102 -->|"Matched (10.200.x.x)"| GW["via 10.0.0.20 dev wg0<br/>(Designated Secure Gateway)"]
-    Table102 -->|"Unmatched Destination"| R2{"ip rule Priority 10001<br/>from 10.0.0.4 prohibit"}
-    
-    R2 -->|"Matches"| Drop["ICMP Destination Administratively Prohibited<br/>(Fails Closed — Zero Leakage)"]
-    
-    R_MAIN["Priority 32766: lookup main<br/>(NEVER REACHED)"]
+    classDef client fill:#e1f5fe,stroke:#0288d1,stroke-width:2px,color:#01579b
+    classDef rule fill:#ede7f6,stroke:#5e35b1,stroke-width:2px,color:#311b92
+    classDef gw fill:#e8f5e9,stroke:#388e3c,stroke-width:2px,color:#1b5e20
+    classDef drop fill:#ffebee,stroke:#d32f2f,stroke-width:2px,color:#b71c1c
 
-    classDef client fill:#e1f5fe,stroke:#0288d1;
-    classDef rule fill:#ede7f6,stroke:#5e35b1;
-    classDef gw fill:#e8f5e9,stroke:#388e3c;
-    classDef drop fill:#ffebee,stroke:#d32f2f;
-    class Client client;
-    class R1 rule;
-    class GW gw;
-    class R2,Drop drop;
+    Client["Peer Traffic (Src: 10.0.0.4)"]:::client --> R1{"ip rule Priority 10000<br/>from 10.0.0.4 lookup table 102"}:::rule
+    
+    R1 -->|"Lookup Table 102"| Table102["Policy Table 102<br/>- 10.200.0.0/16 via 10.0.0.20 dev wg0"]:::rule
+    
+    Table102 -->|"Matched (10.200.x.x)"| GW["via 10.0.0.20 dev wg0<br/>(Designated Secure Gateway)"]:::gw
+    Table102 -->|"Unmatched Destination"| R2{"ip rule Priority 10001<br/>from 10.0.0.4 prohibit"}:::drop
+    
+    R2 -->|"Matches"| Drop["ICMP Destination Administratively Prohibited<br/>(Fails Closed - Zero Leakage)"]:::drop
 ```
 
 #### Generated System Commands
@@ -323,19 +314,23 @@ WG-Busy supervises an embedded `zerotier-one` process, monitors on-link ZeroTier
 
 ```mermaid
 flowchart LR
-    subgraph WGNetwork["WireGuard Overlay (wg0)"]
-        WGP["WG Client<br/>(10.0.0.3)"]
+    classDef wg fill:#e1f5fe,stroke:#0288d1,stroke-width:2px,color:#01579b
+    classDef core fill:#ede7f6,stroke:#5e35b1,stroke-width:2px,color:#311b92
+    classDef zt fill:#fff3e0,stroke:#f57c00,stroke-width:2px,color:#e65100
+
+    subgraph WGNetwork ["WireGuard Overlay (wg0)"]
+        WGP["WG Client<br/>(10.0.0.3)"]:::wg
     end
 
-    subgraph WGBusy["WG-Busy Core Routing"]
-        P_ROUTE["Policy Route Match<br/>10.50.0.0/16 via 10.147.17.99"]
-        DEV_RES["models.DeviceForGateway<br/>Gateway 10.147.17.99 resolved to dev zt5u4va25t"]
-        NAT["iptables NAT POSTROUTING<br/>-s 10.0.0.3 -o zt+ -j MASQUERADE<br/>(Source rewritten to 10.147.17.10)"]
+    subgraph WGBusy ["WG-Busy Core Routing"]
+        P_ROUTE["Policy Route Match<br/>10.50.0.0/16 via 10.147.17.99"]:::core
+        DEV_RES["Device Resolution<br/>Gateway 10.147.17.99 -> dev zt5u4va25t"]:::core
+        NAT["iptables NAT POSTROUTING<br/>-s 10.0.0.3 -o zt+ -j MASQUERADE<br/>(Source rewritten to 10.147.17.10)"]:::core
     end
 
-    subgraph ZTNetwork["ZeroTier SDN (zt*)"]
-        ZTG["ZeroTier Gateway Peer<br/>(10.147.17.99)"]
-        ZTTarget["Target Remote Network<br/>(10.50.0.0/16)"]
+    subgraph ZTNetwork ["ZeroTier SDN (zt*)"]
+        ZTG["ZeroTier Gateway Peer<br/>(10.147.17.99)"]:::zt
+        ZTTarget["Target Remote Network<br/>(10.50.0.0/16)"]:::zt
     end
 
     WGP -->|"Src: 10.0.0.3<br/>Dst: 10.50.1.5"| P_ROUTE
@@ -343,13 +338,6 @@ flowchart LR
     DEV_RES --> NAT
     NAT -->|"Src: 10.147.17.10<br/>Dst: 10.50.1.5"| ZTG
     ZTG --> ZTTarget
-
-    classDef wg fill:#e1f5fe,stroke:#0288d1;
-    classDef core fill:#ede7f6,stroke:#5e35b1;
-    classDef zt fill:#fff3e0,stroke:#f57c00;
-    class WGP wg;
-    class P_ROUTE,DEV_RES,NAT core;
-    class ZTG,ZTTarget zt;
 ```
 
 ### Key Technical Mechanisms:
@@ -365,50 +353,45 @@ WG-Busy embeds `bio-rd` to establish dual-stack (IPv4/IPv6) BGP peering sessions
 
 ```mermaid
 flowchart TD
-    subgraph BGPPeer["External BGP Router (e.g. Mikrotik / VyOS / FRR)"]
-        PEER_RIB["Peer BGP Daemon"]
+    classDef bgp fill:#fce4ec,stroke:#c2185b,stroke-width:2px,color:#880e4f
+    classDef core fill:#ede7f6,stroke:#5e35b1,stroke-width:2px,color:#311b92
+    classDef kernel fill:#fff3e0,stroke:#f57c00,stroke-width:2px,color:#e65100
+    classDef client fill:#e1f5fe,stroke:#0288d1,stroke-width:2px,color:#01579b
+    classDef target fill:#e8f5e9,stroke:#388e3c,stroke-width:2px,color:#1b5e20
+
+    subgraph BGPPeer ["External BGP Router (e.g. Mikrotik / VyOS / FRR)"]
+        PEER_RIB["Peer BGP Daemon"]:::bgp
     end
 
-    subgraph WGBusyHost["WG-Busy Server"]
-        subgraph BioRD["bio-rd BGP Protocol Engine"]
-            SESSION["Dual-Stack BGP Session (TCP:179)<br/>IPv4 & IPv6 Unicast AFI"]
-            IMPORT_CHAIN["Import Filter Chain Evaluation"]
-            LOC_RIB["Default VRF LocRIB"]
+    subgraph WGBusyHost ["WG-Busy Server"]
+        subgraph BioRD ["bio-rd BGP Protocol Engine"]
+            SESSION["Dual-Stack BGP Session (TCP:179)<br/>IPv4 and IPv6 Unicast AFI"]:::core
+            IMPORT_CHAIN["Import Filter Chain Evaluation"]:::core
+            LOC_RIB["Default VRF LocRIB"]:::core
         end
         
-        subgraph KernelFIB["Linux Kernel Routing Engine"]
-            K_CLIENT["bio-rd bgpKernelClient"]
-            MAIN_TABLE["Kernel main Routing Table"]
+        subgraph KernelFIB ["Linux Kernel Routing Engine"]
+            K_CLIENT["bio-rd bgpKernelClient"]:::kernel
+            MAIN_TABLE["Kernel main Routing Table"]:::kernel
         end
     end
 
-    subgraph Clients["Ingress WireGuard Clients"]
-        CLI["Peer A (10.0.0.2)"]
+    subgraph Clients ["Ingress WireGuard Clients"]
+        CLI["Peer A (10.0.0.2)"]:::client
     end
 
-    subgraph Targets["Target Corporate / Remote Subnets"]
-        TARG["Subnet: 192.168.100.0/24<br/>via BGP Peer IP"]
+    subgraph Targets ["Target Corporate / Remote Subnets"]
+        TARG["Subnet: 192.168.100.0/24<br/>via BGP Peer IP"]:::target
     end
 
-    PEER_RIB -->|"1. BGP UPDATE (Prefix: 192.168.100.0/24)"| SESSION
+    PEER_RIB -->|"1. BGP UPDATE Prefix: 192.168.100.0/24"| SESSION
     SESSION --> IMPORT_CHAIN
     IMPORT_CHAIN -->|"2. Filter: ACCEPT"| LOC_RIB
-    LOC_RIB -->|"3. AddPath()"| K_CLIENT
+    LOC_RIB -->|"3. AddPath"| K_CLIENT
     K_CLIENT -->|"4. Netlink Route Injection"| MAIN_TABLE
 
     CLI -->|"5. Packet to 192.168.100.25"| MAIN_TABLE
     MAIN_TABLE -->|"6. Routed via Next-Hop"| TARG
-
-    classDef bgp fill:#fce4ec,stroke:#c2185b;
-    classDef core fill:#ede7f6,stroke:#5e35b1;
-    classDef kernel fill:#fff3e0,stroke:#f57c00;
-    classDef client fill:#e1f5fe,stroke:#0288d1;
-    classDef target fill:#e8f5e9,stroke:#388e3c;
-    class PEER_RIB bgp;
-    BioRD,SESSION,IMPORT_CHAIN,LOC_RIB core;
-    KernelFIB,K_CLIENT,MAIN_TABLE kernel;
-    CLI client;
-    TARG target;
 ```
 
 ---
@@ -419,31 +402,36 @@ WG-Busy provides granular per-peer route filters on both **import** (received pr
 
 ```mermaid
 flowchart TD
-    subgraph Inbound["Inbound BGP Announcement (from Peer)"]
-        ADV["Received Prefix (e.g. 10.10.5.0/24)"]
+    classDef inputNode fill:#e1f5fe,stroke:#0288d1,stroke-width:2px,color:#01579b
+    classDef stepNode fill:#ede7f6,stroke:#5e35b1,stroke-width:2px,color:#311b92
+    classDef acceptNode fill:#e8f5e9,stroke:#388e3c,stroke-width:2px,color:#1b5e20
+    classDef rejectNode fill:#ffebee,stroke:#d32f2f,stroke-width:2px,color:#b71c1c
+
+    subgraph Inbound ["Inbound BGP Announcement (from Peer)"]
+        ADV["Received Prefix (e.g. 10.10.5.0/24)"]:::inputNode
     end
 
-    subgraph FilterChain["bio-rd Filter Evaluation Pipeline"]
+    subgraph FilterChain ["bio-rd Filter Evaluation Pipeline"]
         direction TB
         
-        STEP_MAX{"Max Prefix Length Check<br/>Prefix length > maxReceivedPrefixLength?"}
+        STEP_MAX{"Max Prefix Length Check<br/>Prefix length exceeds limit?"}:::stepNode
         
-        STEP_TERMS{"Evaluate User Terms in Order<br/>(Term 0, Term 1, ... Term N)"}
+        STEP_TERMS{"Evaluate User Terms in Order<br/>(Term 0, Term 1, ... Term N)"}:::stepNode
         
-        MATCH_TYPE{"Matcher Type"}
-        M_EXACT["exact<br/>(matches exact CIDR only)"]
-        M_ORLONGER["orlonger<br/>(matches prefix and any subnet)"]
+        MATCH_TYPE{"Matcher Type"}:::stepNode
+        M_EXACT["exact<br/>(matches exact CIDR only)"]:::stepNode
+        M_ORLONGER["orlonger<br/>(matches prefix and any subnet)"]:::stepNode
         
-        ACTION{"Action"}
-        ACT_ACCEPT["accept"]
-        ACT_REJECT["reject"]
+        ACTION{"Action"}:::stepNode
+        ACT_ACCEPT["accept"]:::acceptNode
+        ACT_REJECT["reject"]:::rejectNode
         
-        DEFAULT_REJECT["Implicit Default Reject Term<br/>(rejects unmatched prefixes)"]
+        DEFAULT_REJECT["Implicit Default Reject Term<br/>(rejects unmatched prefixes)"]:::rejectNode
     end
 
-    subgraph Destination["Route Destination & Dashboard State"]
-        ACCEPTED["Accepted into LocRIB<br/>-> Injected into Kernel main table<br/>(Dashboard: Bold 'Accepted')"]
-        FILTERED["Discarded from FIB<br/>(Dashboard: Faded 'Filtered')"]
+    subgraph Destination ["Route Destination & Dashboard State"]
+        ACCEPTED["Accepted into LocRIB<br/>- Injected into Kernel main table<br/>(Dashboard: Bold 'Accepted')"]:::acceptNode
+        FILTERED["Discarded from FIB<br/>(Dashboard: Faded 'Filtered')"]:::rejectNode
     end
 
     ADV --> STEP_MAX
@@ -462,15 +450,6 @@ flowchart TD
     
     STEP_TERMS -->|"No user terms match"| DEFAULT_REJECT
     DEFAULT_REJECT --> FILTERED
-
-    classDef in fill:#e1f5fe,stroke:#0288d1;
-    classDef step fill:#ede7f6,stroke:#5e35b1;
-    classDef accept fill:#e8f5e9,stroke:#388e3c;
-    classDef reject fill:#ffebee,stroke:#d32f2f;
-    class ADV in;
-    STEP_MAX,STEP_TERMS,MATCH_TYPE,M_EXACT,M_ORLONGER,ACTION step;
-    ACT_ACCEPT,ACCEPTED accept;
-    ACT_REJECT,DEFAULT_REJECT,FILTERED reject;
 ```
 
 ### BGP Configuration Example
