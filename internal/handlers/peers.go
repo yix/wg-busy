@@ -95,10 +95,15 @@ func (h *handler) buildPeerRow(peer models.Peer, exitNodeName string, stats wgst
 		row.TransferTx = wgstats.FormatBytes(stats.TransferTx)
 		row.CurrentRxPS = wgstats.FormatBytesPerSec(stats.CurrentRxPS)
 		row.CurrentTxPS = wgstats.FormatBytesPerSec(stats.CurrentTxPS)
-		row.SparklineSVG = wgstats.RenderSparklineSVG(h.stats.GetPeerHistory(peer.PublicKey), 80, 16)
+		if h.stats != nil {
+			row.SparklineSVG = wgstats.RenderSparklineSVG(h.stats.GetPeerHistory(peer.PublicKey), 80, 16)
+		}
 		if stats.LatestHandshake.After(lastSeen) {
 			lastSeen = stats.LatestHandshake
 		}
+	} else if peer.TransferRx > 0 || peer.TransferTx > 0 {
+		row.TransferRx = wgstats.FormatBytes(peer.TransferRx)
+		row.TransferTx = wgstats.FormatBytes(peer.TransferTx)
 	}
 	row.LastSeen = wgstats.FormatHandshake(lastSeen)
 	if !lastSeen.IsZero() {
@@ -448,12 +453,14 @@ func (h *handler) TogglePeer(w http.ResponseWriter, r *http.Request) {
 func (h *handler) RegeneratePeerKeys(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 
+	var oldPubKey string
 	err := h.store.Write(func(cfg *models.AppConfig) error {
 		p := models.FindPeerByID(cfg.Peers, id)
 		if p == nil {
 			return fmt.Errorf("peer not found")
 		}
 
+		oldPubKey = p.PublicKey
 		privKey, pubKey, err := wireguard.GenerateKeyPair()
 		if err != nil {
 			return fmt.Errorf("key generation: %w", err)
@@ -462,9 +469,15 @@ func (h *handler) RegeneratePeerKeys(w http.ResponseWriter, r *http.Request) {
 		p.PrivateKey = privKey
 		p.PublicKey = pubKey
 		p.LastSeen = time.Time{}
+		p.TransferRx = 0
+		p.TransferTx = 0
 		p.UpdatedAt = time.Now().UTC()
 		return nil
 	})
+
+	if err == nil && h.stats != nil && oldPubKey != "" {
+		h.stats.ResetPeerBase(oldPubKey)
+	}
 
 	var warning *toastData
 	if err != nil {

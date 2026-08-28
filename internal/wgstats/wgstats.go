@@ -37,6 +37,12 @@ type PeerStats struct {
 	CurrentTxPS     float64
 }
 
+// PeerTrafficBase holds persisted base traffic counters for combining with live counters.
+type PeerTrafficBase struct {
+	Rx int64
+	Tx int64
+}
+
 // HistoryPoint is a single bandwidth sample.
 type HistoryPoint struct {
 	Time time.Time
@@ -46,29 +52,63 @@ type HistoryPoint struct {
 
 // Collector polls wg show and collects stats.
 type Collector struct {
-	mu           sync.RWMutex
-	startedAt    time.Time
-	iface        InterfaceStats
-	peers        map[string]*PeerStats     // keyed by public key
-	history      []HistoryPoint            // ring buffer
-	peerHistory  map[string][]HistoryPoint // per-peer ring buffer
-	prevRx       int64
-	prevTx       int64
-	prevPeerRx   map[string]int64
-	prevPeerTx   map[string]int64
-	prevTime     time.Time
-	isUp         bool
-	onHandshakes func(map[string]time.Time)
+	mu            sync.RWMutex
+	startedAt     time.Time
+	iface         InterfaceStats
+	peers         map[string]*PeerStats     // keyed by public key
+	history       []HistoryPoint            // ring buffer
+	peerHistory   map[string][]HistoryPoint // per-peer ring buffer
+	prevRx        int64
+	prevTx        int64
+	prevPeerRx    map[string]int64
+	prevPeerTx    map[string]int64
+	basePeerRx    map[string]int64
+	basePeerTx    map[string]int64
+	sessionPeerRx map[string]int64
+	sessionPeerTx map[string]int64
+	seenPeerEver  map[string]bool
+	prevTime      time.Time
+	isUp          bool
+	onHandshakes  func(map[string]time.Time)
+	onStats       func(map[string]PeerStats)
 }
 
 // NewCollector creates a new stats collector.
 func NewCollector() *Collector {
 	return &Collector{
-		peers:       make(map[string]*PeerStats),
-		peerHistory: make(map[string][]HistoryPoint),
-		prevPeerRx:  make(map[string]int64),
-		prevPeerTx:  make(map[string]int64),
+		peers:         make(map[string]*PeerStats),
+		peerHistory:   make(map[string][]HistoryPoint),
+		prevPeerRx:    make(map[string]int64),
+		prevPeerTx:    make(map[string]int64),
+		basePeerRx:    make(map[string]int64),
+		basePeerTx:    make(map[string]int64),
+		sessionPeerRx: make(map[string]int64),
+		sessionPeerTx: make(map[string]int64),
+		seenPeerEver:  make(map[string]bool),
 	}
+}
+
+// SetPeerBases updates the persisted base traffic counters for peers.
+func (c *Collector) SetPeerBases(bases map[string]PeerTrafficBase) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for k, v := range bases {
+		c.basePeerRx[k] = v.Rx
+		c.basePeerTx[k] = v.Tx
+	}
+}
+
+// ResetPeerBase resets the base and session traffic counters for a specific peer.
+func (c *Collector) ResetPeerBase(publicKey string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.basePeerRx[publicKey] = 0
+	c.basePeerTx[publicKey] = 0
+	c.sessionPeerRx[publicKey] = 0
+	c.sessionPeerTx[publicKey] = 0
+	delete(c.seenPeerEver, publicKey)
+	delete(c.prevPeerRx, publicKey)
+	delete(c.prevPeerTx, publicKey)
 }
 
 // OnHandshakes registers a callback for the latest non-zero peer handshake
@@ -77,6 +117,13 @@ func (c *Collector) OnHandshakes(fn func(map[string]time.Time)) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.onHandshakes = fn
+}
+
+// OnStats registers a callback invoked with the latest peer stats after each poll.
+func (c *Collector) OnStats(fn func(map[string]PeerStats)) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.onStats = fn
 }
 
 // Start begins background polling. Call with startedAt set to when wg was brought up.
@@ -176,8 +223,19 @@ func (c *Collector) pollLoop() {
 	}
 }
 
+var runWGShowDump = func() ([]byte, error) {
+	return exec.Command("wg", "show", "wg0", "dump").Output()
+}
+
+// SetRunWGShowDumpForTesting overrides runWGShowDump for unit testing.
+func SetRunWGShowDumpForTesting(fn func() ([]byte, error)) func() {
+	prev := runWGShowDump
+	runWGShowDump = fn
+	return func() { runWGShowDump = prev }
+}
+
 func (c *Collector) poll() {
-	output, err := exec.Command("wg", "show", "wg0", "dump").Output()
+	output, err := runWGShowDump()
 	now := time.Now()
 
 	c.mu.Lock()
@@ -213,8 +271,6 @@ func (c *Collector) poll() {
 		rx, _ := strconv.ParseInt(fields[5], 10, 64)
 		tx, _ := strconv.ParseInt(fields[6], 10, 64)
 
-		totalRx += rx
-		totalTx += tx
 		seenPeers[pubKey] = true
 
 		var handshake time.Time
@@ -223,32 +279,56 @@ func (c *Collector) poll() {
 			handshakes[pubKey] = handshake
 		}
 
-		// Compute per-peer bandwidth.
+		// Compute per-peer bandwidth and accumulate session transfer deltas.
 		var peerRxPS, peerTxPS float64
-		if !c.prevTime.IsZero() {
-			dt := now.Sub(c.prevTime).Seconds()
-			if dt > 0 {
-				prevRx, ok1 := c.prevPeerRx[pubKey]
-				prevTx, ok2 := c.prevPeerTx[pubKey]
-				if ok1 && ok2 && rx >= prevRx && tx >= prevTx {
-					peerRxPS = float64(rx-prevRx) / dt
-					peerTxPS = float64(tx-prevTx) / dt
+		if !c.seenPeerEver[pubKey] {
+			c.seenPeerEver[pubKey] = true
+			c.prevPeerRx[pubKey] = rx
+			c.prevPeerTx[pubKey] = tx
+		} else {
+			prevRx := c.prevPeerRx[pubKey]
+			prevTx := c.prevPeerTx[pubKey]
+			var deltaRx, deltaTx int64
+			if rx >= prevRx {
+				deltaRx = rx - prevRx
+			} else {
+				// Interface restarted or kernel counters reset to 0
+				deltaRx = rx
+			}
+			if tx >= prevTx {
+				deltaTx = tx - prevTx
+			} else {
+				deltaTx = tx
+			}
+			c.sessionPeerRx[pubKey] += deltaRx
+			c.sessionPeerTx[pubKey] += deltaTx
+
+			if !c.prevTime.IsZero() {
+				dt := now.Sub(c.prevTime).Seconds()
+				if dt > 0 && rx >= prevRx && tx >= prevTx {
+					peerRxPS = float64(deltaRx) / dt
+					peerTxPS = float64(deltaTx) / dt
 				}
 			}
+			c.prevPeerRx[pubKey] = rx
+			c.prevPeerTx[pubKey] = tx
 		}
+
+		combinedRx := c.basePeerRx[pubKey] + c.sessionPeerRx[pubKey]
+		combinedTx := c.basePeerTx[pubKey] + c.sessionPeerTx[pubKey]
+
+		totalRx += combinedRx
+		totalTx += combinedTx
 
 		c.peers[pubKey] = &PeerStats{
 			PublicKey:       pubKey,
 			Endpoint:        endpoint,
 			LatestHandshake: handshake,
-			TransferRx:      rx,
-			TransferTx:      tx,
+			TransferRx:      combinedRx,
+			TransferTx:      combinedTx,
 			CurrentRxPS:     peerRxPS,
 			CurrentTxPS:     peerTxPS,
 		}
-
-		c.prevPeerRx[pubKey] = rx
-		c.prevPeerTx[pubKey] = tx
 
 		// Update per-peer history.
 		ph := c.peerHistory[pubKey]
@@ -266,6 +346,9 @@ func (c *Collector) poll() {
 			delete(c.prevPeerRx, pubKey)
 			delete(c.prevPeerTx, pubKey)
 			delete(c.peerHistory, pubKey)
+			delete(c.seenPeerEver, pubKey)
+			delete(c.basePeerRx, pubKey)
+			delete(c.sessionPeerRx, pubKey)
 		}
 	}
 
@@ -296,8 +379,17 @@ func (c *Collector) poll() {
 		c.history = c.history[len(c.history)-HistorySize:]
 	}
 
+	allStats := make(map[string]PeerStats, len(c.peers))
+	for k, v := range c.peers {
+		allStats[k] = *v
+	}
+	onStats := c.onStats
 	onHandshakes := c.onHandshakes
 	c.mu.Unlock()
+
+	if onStats != nil && len(allStats) > 0 {
+		onStats(allStats)
+	}
 	if onHandshakes != nil && len(handshakes) > 0 {
 		onHandshakes(handshakes)
 	}

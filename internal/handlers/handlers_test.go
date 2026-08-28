@@ -139,6 +139,75 @@ func TestPeerLastSeenUsesNewestTimestampAndExactHoverText(t *testing.T) {
 	}
 }
 
+func TestPeerRowDisplaysPersistedTrafficCountersWhenLiveStatsUnavailable(t *testing.T) {
+	h := &handler{}
+	row := h.buildPeerRow(
+		models.Peer{
+			PublicKey:  "peer-key",
+			AllowedIPs: "10.0.0.2/32",
+			TransferRx: 1024 * 1024 * 5, // 5 MB
+			TransferTx: 1024 * 1024 * 2, // 2 MB
+		},
+		"",
+		wgstats.PeerStats{},
+	)
+
+	if row.TransferRx != "5.0 MB" || row.TransferTx != "2.0 MB" {
+		t.Fatalf("row transfer rx=%q, tx=%q, want 5.0 MB, 2.0 MB", row.TransferRx, row.TransferTx)
+	}
+}
+
+func TestRegeneratePeerKeysResetsTrafficCounters(t *testing.T) {
+	dir := t.TempDir()
+	configPath := dir + "/config.yaml"
+	if err := os.WriteFile(configPath, []byte(`server:
+  privateKey: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
+  listenPort: 51820
+  address: 10.0.0.1/24
+peers:
+  - id: peer-1
+    name: Alice
+    publicKey: KEYALICE=
+    allowedIPs: 10.0.0.2/32
+    transferRx: 5000
+    transferTx: 6000
+    lastSeen: 2026-08-13T12:00:00Z
+`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	store, err := config.Load(configPath, dir+"/wg0.conf")
+	if err != nil {
+		t.Fatal(err)
+	}
+	collector := wgstats.NewCollector()
+	collector.SetPeerBases(map[string]wgstats.PeerTrafficBase{
+		"KEYALICE=": {Rx: 5000, Tx: 6000},
+	})
+	h := &handler{store: store, stats: collector}
+
+	req := httptest.NewRequest("POST", "/api/peers/peer-1/regenerate-keys", nil)
+	req.SetPathValue("id", "peer-1")
+	rec := httptest.NewRecorder()
+	h.RegeneratePeerKeys(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("regenerate keys status = %d, want 200", rec.Code)
+	}
+
+	store.Read(func(cfg *models.AppConfig) {
+		p := models.FindPeerByID(cfg.Peers, "peer-1")
+		if p == nil {
+			t.Fatal("peer not found")
+		}
+		if p.TransferRx != 0 || p.TransferTx != 0 || !p.LastSeen.IsZero() {
+			t.Fatalf("traffic counters and lastSeen not reset: Rx:%d, Tx:%d, LastSeen:%v", p.TransferRx, p.TransferTx, p.LastSeen)
+		}
+		if p.PublicKey == "KEYALICE=" {
+			t.Fatal("public key was not regenerated")
+		}
+	})
+}
+
 func TestPeerStatsLayoutPreventsSparklineWrapping(t *testing.T) {
 	templateSource, err := os.ReadFile("../../web/templates.html")
 	if err != nil {

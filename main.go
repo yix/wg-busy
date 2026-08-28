@@ -111,24 +111,43 @@ func main() {
 	store.Read(func(cfg *models.AppConfig) { zt.Configure(cfg) })
 	zt.Start()
 
-	// Go does not run defers on signals, so shut the child down explicitly —
+	// Start stats collector with persisted base traffic counters.
+	stats := wgstats.NewCollector()
+	store.Read(func(cfg *models.AppConfig) {
+		bases := make(map[string]wgstats.PeerTrafficBase, len(cfg.Peers))
+		for _, p := range cfg.Peers {
+			bases[p.PublicKey] = wgstats.PeerTrafficBase{
+				Rx: p.TransferRx,
+				Tx: p.TransferTx,
+			}
+		}
+		stats.SetPeerBases(bases)
+	})
+	stats.OnStats(func(peerStats map[string]wgstats.PeerStats) {
+		snapshots := make(map[string]config.PeerStatsSnapshot, len(peerStats))
+		for k, v := range peerStats {
+			snapshots[k] = config.PeerStatsSnapshot{
+				LastSeen:   v.LatestHandshake,
+				TransferRx: v.TransferRx,
+				TransferTx: v.TransferTx,
+			}
+		}
+		store.RecordPeerStats(snapshots)
+	})
+	stopPersister := store.StartStatsPersister(1 * time.Minute)
+
+	// Go does not run defers on signals, so shut down explicitly —
 	// otherwise zerotier-one outlives us and keeps holding its port.
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 	go func() {
 		sig := <-sigCh
 		log.Printf("received %s, shutting down", sig)
+		stopPersister()
 		zt.Stop()
 		os.Exit(0)
 	}()
 
-	// Start stats collector.
-	stats := wgstats.NewCollector()
-	stats.OnHandshakes(func(seen map[string]time.Time) {
-		if err := store.RecordPeerLastSeen(seen); err != nil {
-			log.Printf("persisting WireGuard peer last-seen times: %v", err)
-		}
-	})
 	if !wgStartedAt.IsZero() {
 		stats.Start(wgStartedAt)
 	} else {

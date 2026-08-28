@@ -3,6 +3,7 @@ package config
 import (
 	"errors"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"sync"
@@ -21,6 +22,13 @@ var (
 	configureBGP    = bgp.Configure
 )
 
+// PeerStatsSnapshot holds the latest observed stats for a peer.
+type PeerStatsSnapshot struct {
+	LastSeen   time.Time
+	TransferRx int64
+	TransferTx int64
+}
+
 // Store holds the in-memory config and manages persistence to YAML + wg0.conf.
 type Store struct {
 	mu           sync.RWMutex
@@ -30,6 +38,7 @@ type Store struct {
 	routingState models.AppConfig
 	routingNets  []models.GatewayNet
 	routingBGP   map[string][]string
+	statsDirty   bool
 	// wgRestartPending stays set until wg-quick has successfully rebuilt the
 	// interface. syncconf cannot apply wg-quick-owned server fields.
 	wgRestartPending bool
@@ -155,34 +164,95 @@ func (s *Store) Read(fn func(cfg *models.AppConfig)) {
 	fn(&snapshot)
 }
 
+// RecordPeerStats updates in-memory peer last seen times and traffic counters
+// without writing to disk immediately. It marks the store dirty so the background
+// persister can save the changes periodically.
+func (s *Store) RecordPeerStats(stats map[string]PeerStatsSnapshot) {
+	if len(stats) == 0 {
+		return
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	for i := range s.config.Peers {
+		peer := &s.config.Peers[i]
+		stat, ok := stats[peer.PublicKey]
+		if !ok {
+			continue
+		}
+		if !stat.LastSeen.IsZero() && stat.LastSeen.After(peer.LastSeen) {
+			peer.LastSeen = stat.LastSeen.UTC()
+			s.statsDirty = true
+		}
+		if stat.TransferRx != peer.TransferRx || stat.TransferTx != peer.TransferTx {
+			peer.TransferRx = stat.TransferRx
+			peer.TransferTx = stat.TransferTx
+			s.statsDirty = true
+		}
+	}
+}
+
+// SaveStats writes dirty in-memory stats to config.yaml if changes occurred.
+func (s *Store) SaveStats() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if !s.statsDirty {
+		return nil
+	}
+
+	if err := s.saveYAML(); err != nil {
+		return err
+	}
+	s.statsDirty = false
+	return nil
+}
+
+// StartStatsPersister starts a background goroutine that periodically saves
+// accumulated peer stats (lastSeen, transfer counters) to disk. It returns a
+// stop function that flushes pending stats and stops the background ticker.
+func (s *Store) StartStatsPersister(interval time.Duration) func() {
+	ticker := time.NewTicker(interval)
+	stopCh := make(chan struct{})
+	doneCh := make(chan struct{})
+
+	go func() {
+		defer close(doneCh)
+		for {
+			select {
+			case <-ticker.C:
+				if err := s.SaveStats(); err != nil {
+					log.Printf("saving peer stats: %v", err)
+				}
+			case <-stopCh:
+				ticker.Stop()
+				return
+			}
+		}
+	}()
+
+	return func() {
+		close(stopCh)
+		<-doneCh
+		if err := s.SaveStats(); err != nil {
+			log.Printf("flushing peer stats on shutdown: %v", err)
+		}
+	}
+}
+
 // RecordPeerLastSeen persists newer WireGuard handshake times without
 // reapplying configuration: last-seen data does not change wg0.conf.
 func (s *Store) RecordPeerLastSeen(seen map[string]time.Time) error {
 	if len(seen) == 0 {
 		return nil
 	}
-
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	backup := s.config.Clone()
-	changed := false
-	for i := range s.config.Peers {
-		peer := &s.config.Peers[i]
-		lastSeen, ok := seen[peer.PublicKey]
-		if ok && lastSeen.After(peer.LastSeen) {
-			peer.LastSeen = lastSeen.UTC()
-			changed = true
-		}
+	snapshots := make(map[string]PeerStatsSnapshot, len(seen))
+	for k, v := range seen {
+		snapshots[k] = PeerStatsSnapshot{LastSeen: v}
 	}
-	if !changed {
-		return nil
-	}
-	if err := s.saveYAML(); err != nil {
-		s.config = backup
-		return err
-	}
-	return nil
+	s.RecordPeerStats(snapshots)
+	return s.SaveStats()
 }
 
 // Write executes fn with a write lock, then saves YAML and renders wg0.conf.
@@ -217,6 +287,7 @@ func (s *Store) Write(fn func(cfg *models.AppConfig) error) error {
 		s.wgRestartPending = backupRestartPending
 		return fmt.Errorf("saving config: %w", err)
 	}
+	s.statsDirty = false
 
 	if err := s.renderWGConfig(); err != nil {
 		s.config = backup

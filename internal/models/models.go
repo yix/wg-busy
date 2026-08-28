@@ -208,9 +208,11 @@ type Peer struct {
 	PolicyRoutingTableID uint     `yaml:"policyRoutingTableID,omitempty"`
 	Enabled              bool     `yaml:"enabled"`
 
-	CreatedAt time.Time `yaml:"createdAt"`
-	UpdatedAt time.Time `yaml:"updatedAt"`
-	LastSeen  time.Time `yaml:"lastSeen,omitempty"`
+	CreatedAt  time.Time `yaml:"createdAt"`
+	UpdatedAt  time.Time `yaml:"updatedAt"`
+	LastSeen   time.Time `yaml:"lastSeen,omitempty"`
+	TransferRx int64     `yaml:"transferRx,omitempty"`
+	TransferTx int64     `yaml:"transferTx,omitempty"`
 }
 
 // BGPRoute represents a single prefix in the BGP AdjRIBIn or AdjRIBOut.

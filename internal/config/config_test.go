@@ -130,6 +130,123 @@ func TestRecordPeerLastSeenPersistsOnlyNewerHandshake(t *testing.T) {
 	}
 }
 
+func TestRecordPeerStatsBatchesInMemoryUntilSaveStats(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.yaml")
+	seen := time.Date(2026, time.August, 13, 15, 4, 5, 0, time.UTC)
+	s := &Store{
+		configPath: configPath,
+		config: models.AppConfig{Peers: []models.Peer{{
+			PublicKey:  "peer-key",
+			TransferRx: 100,
+			TransferTx: 200,
+		}}},
+	}
+
+	// Record updated stats in memory
+	s.RecordPeerStats(map[string]PeerStatsSnapshot{
+		"peer-key": {
+			LastSeen:   seen,
+			TransferRx: 1500,
+			TransferTx: 2500,
+		},
+	})
+
+	if !s.statsDirty {
+		t.Fatal("expected statsDirty to be true after recording stats")
+	}
+
+	// File should not exist yet before SaveStats
+	if _, err := os.Stat(configPath); err == nil {
+		t.Fatal("config file was written before SaveStats was called")
+	}
+
+	// In-memory config must be updated immediately
+	if s.config.Peers[0].TransferRx != 1500 || s.config.Peers[0].TransferTx != 2500 || !s.config.Peers[0].LastSeen.Equal(seen) {
+		t.Fatalf("in-memory stats not updated: %#v", s.config.Peers[0])
+	}
+
+	// SaveStats should write to disk and clear dirty flag
+	if err := s.SaveStats(); err != nil {
+		t.Fatal(err)
+	}
+	if s.statsDirty {
+		t.Fatal("expected statsDirty to be false after SaveStats")
+	}
+
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var persisted models.AppConfig
+	if err := yaml.Unmarshal(data, &persisted); err != nil {
+		t.Fatal(err)
+	}
+	if persisted.Peers[0].TransferRx != 1500 || persisted.Peers[0].TransferTx != 2500 || !persisted.Peers[0].LastSeen.Equal(seen) {
+		t.Fatalf("persisted stats mismatch: %#v", persisted.Peers[0])
+	}
+
+	// Calling SaveStats again when not dirty should be a no-op
+	if err := s.SaveStats(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestStartStatsPersisterPeriodicallyFlushes(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.yaml")
+	s := &Store{
+		configPath: configPath,
+		config: models.AppConfig{Peers: []models.Peer{{
+			PublicKey: "peer-key",
+		}}},
+	}
+
+	stop := s.StartStatsPersister(10 * time.Millisecond)
+
+	s.RecordPeerStats(map[string]PeerStatsSnapshot{
+		"peer-key": {
+			TransferRx: 777,
+			TransferTx: 888,
+		},
+	})
+
+	// Wait briefly for ticker to fire
+	time.Sleep(50 * time.Millisecond)
+
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var persisted models.AppConfig
+	if err := yaml.Unmarshal(data, &persisted); err != nil {
+		t.Fatal(err)
+	}
+	if persisted.Peers[0].TransferRx != 777 || persisted.Peers[0].TransferTx != 888 {
+		t.Fatalf("periodic persisted stats mismatch: %#v", persisted.Peers[0])
+	}
+
+	// Record another stat and stop persister (should flush on shutdown)
+	s.RecordPeerStats(map[string]PeerStatsSnapshot{
+		"peer-key": {
+			TransferRx: 999,
+			TransferTx: 1111,
+		},
+	})
+	stop()
+
+	data, err = os.ReadFile(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := yaml.Unmarshal(data, &persisted); err != nil {
+		t.Fatal(err)
+	}
+	if persisted.Peers[0].TransferRx != 999 || persisted.Peers[0].TransferTx != 1111 {
+		t.Fatalf("flush on shutdown stats mismatch: %#v", persisted.Peers[0])
+	}
+}
+
 func TestWriteReportsRestartPendingUntilMarkedApplied(t *testing.T) {
 	stubLiveServices(t, true)
 	dir := t.TempDir()
