@@ -87,12 +87,13 @@ The application is configured via CLI flags:
 
 ### Routing & Advanced Traffic Management
 
-One of WG-Busy's key features is the ability to define complex routing topologies.
+One of WG-Busy's key features is the ability to define complex routing topologies. For a visual architecture guide with sequence and flow diagrams of all supported routing use cases, see [**ROUTING_SHOWCASE.md**](ROUTING_SHOWCASE.md).
 
 -   **Exit Node**: Toggle "Exit Node" on a peer to allow it to route traffic for others.
 -   **Route Via**: For any other peer, select an available Exit Node to route all their traffic through that peer.
 -   **Advertised Routes**: Define subnets that reside behind a peer. The server will automatically route traffic for these subnets to the peer.
 -   **Policy Routes**: Configure explicit `CIDR via Gateway IP` rules per client. All traffic matching the CIDR and originating from that client will be directed to a dedicated policy routing table and pushed out the specified gateway.
+-   **Strict Policy Routing**: Confine a peer to its own routes. Traffic that matches none of them is rejected (`prohibit`) instead of falling back to the server's main table.
 
 This is implemented using Linux policy routing (`ip rule` and custom routing tables), which WG-Busy manages automatically in the `PostUp`/`PostDown` hooks.
 
