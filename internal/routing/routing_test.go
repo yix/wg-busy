@@ -49,22 +49,180 @@ func TestPolicyRouteDeviceSelection(t *testing.T) {
 		t.Errorf("policy route teardown depends on rediscovering its old interface:\n%s", down)
 	}
 
-	// Without ZeroTier the same route falls back to wg0 rather than emitting an
-	// empty device, which would be a syntax error at apply time.
+	// Without ZeroTier, non-strict route falls back to wg0.
 	noZT := strings.Join(GeneratePostUpCommands(cfg, models.GatewayNets(cfg.Server.Address, nil)), "\n")
 	if !strings.Contains(noZT, "ip route replace 10.9.9.0/24 via 10.147.17.99 dev wg0 table 100") {
-		t.Errorf("unknown gateway did not fall back to wg0:\n%s", noZT)
+		t.Errorf("unknown non-strict gateway did not fall back to wg0:\n%s", noZT)
+	}
+
+	// Strict route with unknown gateway must NOT fall back to wg0.
+	strictCfg := cfg.Clone()
+	strictCfg.Peers[0].StrictPolicyRouting = true
+	strictNoZT := strings.Join(GeneratePostUpCommands(strictCfg, models.GatewayNets(strictCfg.Server.Address, nil)), "\n")
+	if strings.Contains(strictNoZT, "10.9.9.0/24 via 10.147.17.99 dev wg0") {
+		t.Errorf("strict route with unknown gateway unexpectedly routed over wg0:\n%s", strictNoZT)
 	}
 }
 
-func TestReconcileRemovesPreviousRulesBeforeAddingNext(t *testing.T) {
-	previous := models.AppConfig{Peers: []models.Peer{{
-		ID: "p1", Enabled: true, AllowedIPs: "10.0.0.5/32",
-		PolicyRoutingTableID: 100, PolicyRoutes: []string{"10.5.5.0/24 via 10.0.0.2"},
-		StrictPolicyRouting: true,
-	}}}
+func TestStrictEgressRulesGeneration(t *testing.T) {
+	cfg := models.AppConfig{
+		Server: models.ServerConfig{Address: "10.0.0.1/24, fd00::1/64"},
+		Peers: []models.Peer{
+			{
+				ID: "exit", Name: "exit-node", Enabled: true, AllowedIPs: "10.0.0.10/32, fd00::10/128",
+				IsExitNode: true, ExitNodeRoutes: []string{"198.51.100.0/24", "2001:db8:beef::/64"}, RoutingTableID: 101,
+			},
+			{
+				ID: "p1", Name: "strict-client", Enabled: true, AllowedIPs: "10.0.0.5/32, fd00::5/128",
+				ExitNodeID:           "exit",
+				PolicyRoutingTableID: 100,
+				PolicyRoutes: []string{
+					"10.5.5.0/24 via 10.147.17.99",
+					"fd00:beef::/64 via fd00:cafe::99",
+				},
+				StrictPolicyRouting: true,
+			},
+		},
+	}
+
+	gateways := models.GatewayNets(cfg.Server.Address, []models.GatewayNet{
+		{Device: "zt4v4", CIDR: "10.147.17.36/24"},
+		{Device: "zt4v6", CIDR: "fd00:cafe::1/64"},
+	})
+
+	exitNodes := enabledExitNodes(cfg)
+	rules := strictEgressRules(cfg, gateways, exitNodes)
+
+	// Verify IPv4 rules for 10.0.0.5:
+	// 1. exit node route (198.51.100.0/24 on wg0 -> RETURN)
+	// 2. policy route (10.5.5.0/24 on zt4v4 -> RETURN)
+	// 3. terminal reject (REJECT)
+	// Verify IPv6 rules for fd00::5:
+	// 1. exit node route (2001:db8:beef::/64 on wg0 -> RETURN)
+	// 2. policy route (fd00:beef::/64 on zt4v6 -> RETURN)
+	// 3. terminal reject (REJECT)
+
+	var v4Allows, v6Allows []strictEgressRule
+	var v4Rejects, v6Rejects []strictEgressRule
+	for _, r := range rules {
+		if !r.IsV6 {
+			if r.Action == "RETURN" {
+				v4Allows = append(v4Allows, r)
+			} else {
+				v4Rejects = append(v4Rejects, r)
+			}
+		} else {
+			if r.Action == "RETURN" {
+				v6Allows = append(v6Allows, r)
+			} else {
+				v6Rejects = append(v6Rejects, r)
+			}
+		}
+	}
+
+	if len(v4Allows) != 2 {
+		t.Fatalf("v4 allow count = %d, want 2: %#v", len(v4Allows), v4Allows)
+	}
+	if v4Allows[0].Dest != "198.51.100.0/24" || v4Allows[0].OutDev != models.WGDevice {
+		t.Errorf("v4 exit allow mismatch: %#v", v4Allows[0])
+	}
+	if v4Allows[1].Dest != "10.5.5.0/24" || v4Allows[1].OutDev != "zt4v4" {
+		t.Errorf("v4 policy allow mismatch: %#v", v4Allows[1])
+	}
+	if len(v4Rejects) != 1 || v4Rejects[0].Source != "10.0.0.5" {
+		t.Errorf("v4 terminal reject missing or mismatch: %#v", v4Rejects)
+	}
+
+	if len(v6Allows) != 2 {
+		t.Fatalf("v6 allow count = %d, want 2: %#v", len(v6Allows), v6Allows)
+	}
+	if v6Allows[0].Dest != "2001:db8:beef::/64" || v6Allows[0].OutDev != models.WGDevice {
+		t.Errorf("v6 exit allow mismatch: %#v", v6Allows[0])
+	}
+	if v6Allows[1].Dest != "fd00:beef::/64" || v6Allows[1].OutDev != "zt4v6" {
+		t.Errorf("v6 policy allow mismatch: %#v", v6Allows[1])
+	}
+	if len(v6Rejects) != 1 || v6Rejects[0].Source != "fd00::5" {
+		t.Errorf("v6 terminal reject missing or mismatch: %#v", v6Rejects)
+	}
+}
+
+func TestStrictEgressUnresolvedGatewayEmitsNoAllow(t *testing.T) {
+	cfg := models.AppConfig{
+		Server: models.ServerConfig{Address: "10.0.0.1/24"},
+		Peers: []models.Peer{
+			{
+				ID: "p1", Name: "strict-client", Enabled: true, AllowedIPs: "10.0.0.5/32",
+				PolicyRoutingTableID: 100,
+				PolicyRoutes:         []string{"10.5.5.0/24 via 10.147.17.99"},
+				StrictPolicyRouting:  true,
+			},
+		},
+	}
+
+	// No ZeroTier gateway known
+	gateways := models.GatewayNets(cfg.Server.Address, nil)
+	rules := strictEgressRules(cfg, gateways, nil)
+
+	// Should only have the terminal reject, no allow rule
+	if len(rules) != 1 || rules[0].Action != "REJECT" {
+		t.Fatalf("unresolved gateway emitted rules: %#v", rules)
+	}
+}
+
+func TestStrictFirewallCommandsPostUpAndPostDown(t *testing.T) {
+	cfg := models.AppConfig{
+		Server: models.ServerConfig{Address: "10.0.0.1/24"},
+		Peers: []models.Peer{
+			{
+				ID: "p1", Name: "strict", Enabled: true, AllowedIPs: "10.0.0.5/32",
+				PolicyRoutingTableID: 100, PolicyRoutes: []string{"10.5.5.0/24 via 10.0.0.2"},
+				StrictPolicyRouting: true,
+			},
+		},
+	}
+	gateways := models.GatewayNets(cfg.Server.Address, nil)
+
+	up := strings.Join(GeneratePostUpCommands(cfg, gateways), "\n")
+	for _, want := range []string{
+		"iptables -w -N WG_BUSY_STRICT4",
+		"iptables -w -C FORWARD -i wg0 -j WG_BUSY_STRICT4 2>/dev/null || iptables -w -I FORWARD 1 -i wg0 -j WG_BUSY_STRICT4",
+		"iptables -w -F WG_BUSY_STRICT4",
+		"iptables -w -A WG_BUSY_STRICT4 -s 10.0.0.5 -d 10.5.5.0/24 -o wg0 -j RETURN",
+		"iptables -w -A WG_BUSY_STRICT4 -s 10.0.0.5 -j REJECT --reject-with icmp-admin-prohibited",
+		"ip6tables -w -N WG_BUSY_STRICT6",
+	} {
+		if !strings.Contains(up, want) {
+			t.Errorf("PostUp missing %q:\n%s", want, up)
+		}
+	}
+
+	down := strings.Join(GeneratePostDownCommands(cfg, gateways), "\n")
+	for _, want := range []string{
+		"iptables -w -D FORWARD -i wg0 -j WG_BUSY_STRICT4",
+		"iptables -w -F WG_BUSY_STRICT4",
+		"iptables -w -X WG_BUSY_STRICT4",
+		"ip6tables -w -D FORWARD -i wg0 -j WG_BUSY_STRICT6",
+		"ip6tables -w -F WG_BUSY_STRICT6",
+		"ip6tables -w -X WG_BUSY_STRICT6",
+	} {
+		if !strings.Contains(down, want) {
+			t.Errorf("PostDown missing %q:\n%s", want, down)
+		}
+	}
+}
+
+func TestStagedReconcileTemporaryGuardsOrder(t *testing.T) {
+	previous := models.AppConfig{
+		Server: models.ServerConfig{Address: "10.0.0.1/24"},
+		Peers: []models.Peer{{
+			ID: "p1", Enabled: true, AllowedIPs: "10.0.0.5/32",
+			PolicyRoutingTableID: 100, PolicyRoutes: []string{"10.5.5.0/24 via 10.0.0.2"},
+			StrictPolicyRouting: true,
+		}},
+	}
 	next := previous.Clone()
-	next.Peers[0].StrictPolicyRouting = false
+	next.Peers[0].PolicyRoutes = []string{"10.6.6.0/24 via 10.0.0.2"}
 
 	originalUp, originalRun := interfaceUp, runShellCommand
 	t.Cleanup(func() { interfaceUp, runShellCommand = originalUp, originalRun })
@@ -74,22 +232,45 @@ func TestReconcileRemovesPreviousRulesBeforeAddingNext(t *testing.T) {
 		commands = append(commands, command)
 		return nil, nil
 	}
-	if err := Reconcile(previous, nil, nil, next, nil, nil); err != nil {
+
+	gateways := models.GatewayNets(previous.Server.Address, nil)
+	if err := Reconcile(previous, gateways, nil, next, gateways, nil); err != nil {
 		t.Fatal(err)
 	}
+
 	joined := strings.Join(commands, "\n")
-	deleteAt := strings.Index(joined, "ip rule del from 10.0.0.5 prohibit")
-	addAt := strings.Index(joined, "ip rule add from 10.0.0.5 table 100")
-	if deleteAt < 0 || addAt < 0 || deleteAt > addAt {
-		t.Fatalf("previous strict rule was not removed before next state:\n%s", joined)
+	tempGuardAdd := strings.Index(joined, "iptables -w -I FORWARD 1 -i wg0 -s 10.0.0.5 -m comment --comment 'wg-busy strict apply' -j REJECT")
+	delOldRule := strings.Index(joined, "ip rule del from 10.0.0.5 prohibit")
+	addNewRule := strings.Index(joined, "ip rule add from 10.0.0.5 prohibit")
+	tempGuardDel := strings.Index(joined, "iptables -w -D FORWARD -i wg0 -s 10.0.0.5 -m comment --comment 'wg-busy strict apply'")
+
+	if tempGuardAdd < 0 {
+		t.Fatalf("temporary guard was not installed:\n%s", joined)
+	}
+	if delOldRule < 0 || addNewRule < 0 {
+		t.Fatalf("old rule del (%d) or new rule add (%d) missing:\n%s", delOldRule, addNewRule, joined)
+	}
+	if tempGuardDel < 0 {
+		t.Fatalf("temporary guard was not removed:\n%s", joined)
+	}
+
+	if tempGuardAdd > delOldRule {
+		t.Fatalf("temporary guard was installed after previous rules were removed:\n%s", joined)
+	}
+	if tempGuardDel < addNewRule {
+		t.Fatalf("temporary guard was removed before new rules were added:\n%s", joined)
 	}
 }
 
-func TestReconcileRestoresPreviousStateOnFailure(t *testing.T) {
-	previous := models.AppConfig{Peers: []models.Peer{{
-		ID: "p1", Enabled: true, AllowedIPs: "10.0.0.5/32",
-		PolicyRoutingTableID: 100, PolicyRoutes: []string{"10.5.5.0/24 via 10.0.0.2"},
-	}}}
+func TestStagedReconcileFailureLeavesRejectActive(t *testing.T) {
+	previous := models.AppConfig{
+		Server: models.ServerConfig{Address: "10.0.0.1/24"},
+		Peers: []models.Peer{{
+			ID: "p1", Enabled: true, AllowedIPs: "10.0.0.5/32",
+			PolicyRoutingTableID: 100, PolicyRoutes: []string{"10.5.5.0/24 via 10.0.0.2"},
+			StrictPolicyRouting: true,
+		}},
+	}
 	next := previous.Clone()
 	next.Peers[0].AllowedIPs = "10.0.0.9/32"
 
@@ -106,11 +287,103 @@ func TestReconcileRestoresPreviousStateOnFailure(t *testing.T) {
 		}
 		return nil, nil
 	}
-	if err := Reconcile(previous, nil, nil, next, nil, nil); err == nil {
+
+	gateways := models.GatewayNets(previous.Server.Address, nil)
+	if err := Reconcile(previous, gateways, nil, next, gateways, nil); err == nil {
 		t.Fatal("Reconcile succeeded after command failure")
 	}
-	if !strings.Contains(strings.Join(commands, "\n"), "ip rule add from 10.0.0.5") {
-		t.Fatalf("previous state was not restored:\n%s", strings.Join(commands, "\n"))
+
+	joined := strings.Join(commands, "\n")
+	// Must have installed temporary guards for affected sources (10.0.0.5 and 10.0.0.9)
+	if !strings.Contains(joined, "-s 10.0.0.5 -m comment --comment 'wg-busy strict apply' -j REJECT") {
+		t.Fatalf("temporary guard not installed for previous source:\n%s", joined)
+	}
+	if !strings.Contains(joined, "-s 10.0.0.9 -m comment --comment 'wg-busy strict apply' -j REJECT") {
+		t.Fatalf("temporary guard not installed for next source:\n%s", joined)
+	}
+	// Must NOT have removed temporary guards on failure
+	if strings.Contains(joined, "-D FORWARD -i wg0 -s 10.0.0.5 -m comment --comment 'wg-busy strict apply'") ||
+		strings.Contains(joined, "-D FORWARD -i wg0 -s 10.0.0.9 -m comment --comment 'wg-busy strict apply'") {
+		t.Fatalf("temporary guard was removed despite apply failure:\n%s", joined)
+	}
+}
+
+func TestReconcileStrictToNonStrictOrdering(t *testing.T) {
+	previous := models.AppConfig{
+		Server: models.ServerConfig{Address: "10.0.0.1/24"},
+		Peers: []models.Peer{{
+			ID: "p1", Enabled: true, AllowedIPs: "10.0.0.5/32",
+			PolicyRoutingTableID: 100, PolicyRoutes: []string{"10.5.5.0/24 via 10.0.0.2"},
+			StrictPolicyRouting: true,
+		}},
+	}
+	next := previous.Clone()
+	next.Peers[0].StrictPolicyRouting = false
+
+	originalUp, originalRun := interfaceUp, runShellCommand
+	t.Cleanup(func() { interfaceUp, runShellCommand = originalUp, originalRun })
+	interfaceUp = func() bool { return true }
+	var commands []string
+	runShellCommand = func(command string) ([]byte, error) {
+		commands = append(commands, command)
+		return nil, nil
+	}
+
+	gateways := models.GatewayNets(previous.Server.Address, nil)
+	if err := Reconcile(previous, gateways, nil, next, gateways, nil); err != nil {
+		t.Fatal(err)
+	}
+
+	joined := strings.Join(commands, "\n")
+	guardAdd := strings.Index(joined, "iptables -w -I FORWARD 1 -i wg0 -s 10.0.0.5 -m comment --comment 'wg-busy strict apply'")
+	delProhibit := strings.Index(joined, "ip rule del from 10.0.0.5 prohibit")
+	addNewRule := strings.Index(joined, "ip rule add from 10.0.0.5 table 100")
+	guardDel := strings.Index(joined, "iptables -w -D FORWARD -i wg0 -s 10.0.0.5 -m comment --comment 'wg-busy strict apply'")
+
+	if guardAdd < 0 || delProhibit < 0 || addNewRule < 0 || guardDel < 0 {
+		t.Fatalf("missing required transition commands:\n%s", joined)
+	}
+	if guardAdd > delProhibit || guardDel < addNewRule {
+		t.Fatalf("strict-to-non-strict unguarded window detected:\n%s", joined)
+	}
+}
+
+func TestReconcileNonStrictToStrictOrdering(t *testing.T) {
+	previous := models.AppConfig{
+		Server: models.ServerConfig{Address: "10.0.0.1/24"},
+		Peers: []models.Peer{{
+			ID: "p1", Enabled: true, AllowedIPs: "10.0.0.5/32",
+			PolicyRoutingTableID: 100, PolicyRoutes: []string{"10.5.5.0/24 via 10.0.0.2"},
+			StrictPolicyRouting: false,
+		}},
+	}
+	next := previous.Clone()
+	next.Peers[0].StrictPolicyRouting = true
+
+	originalUp, originalRun := interfaceUp, runShellCommand
+	t.Cleanup(func() { interfaceUp, runShellCommand = originalUp, originalRun })
+	interfaceUp = func() bool { return true }
+	var commands []string
+	runShellCommand = func(command string) ([]byte, error) {
+		commands = append(commands, command)
+		return nil, nil
+	}
+
+	gateways := models.GatewayNets(previous.Server.Address, nil)
+	if err := Reconcile(previous, gateways, nil, next, gateways, nil); err != nil {
+		t.Fatal(err)
+	}
+
+	joined := strings.Join(commands, "\n")
+	guardAdd := strings.Index(joined, "iptables -w -I FORWARD 1 -i wg0 -s 10.0.0.5 -m comment --comment 'wg-busy strict apply'")
+	addProhibit := strings.Index(joined, "ip rule add from 10.0.0.5 prohibit")
+	guardDel := strings.Index(joined, "iptables -w -D FORWARD -i wg0 -s 10.0.0.5 -m comment --comment 'wg-busy strict apply'")
+
+	if guardAdd < 0 || addProhibit < 0 || guardDel < 0 {
+		t.Fatalf("missing required transition commands:\n%s", joined)
+	}
+	if guardAdd > addProhibit || guardDel < addProhibit {
+		t.Fatalf("non-strict-to-strict unguarded window detected:\n%s", joined)
 	}
 }
 

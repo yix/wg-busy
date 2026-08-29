@@ -95,7 +95,13 @@
             {{Peer.Name}}
             {{#if Peer.IsExitNode}}<span class="badge badge-exit">Exit Node</span>{{/if}}
             {{#if ExitNodeName}}<span class="badge badge-via">via {{ExitNodeName}}</span>{{/if}}
-            {{#if Peer.StrictPolicyRouting}}<span class="badge badge-warn" title="Traffic may only use this peer's own routes">Strict</span>{{/if}}
+            {{#if Peer.StrictPolicyRouting}}
+                {{#if StrictApplied}}
+                <span class="badge badge-warn" title="Traffic may only use this peer's own routes">Strict</span>
+                {{else}}
+                <span class="badge badge-pending" title="Saved, not applied — strict routing is pending or failed live apply">Saved, not applied</span>
+                {{/if}}
+            {{/if}}
         </strong>
         {{#if Endpoint}}<div style="font-size:0.8em;font-weight:normal;opacity:0.7;margin-top:0.1em">({{Endpoint}})</div>{{/if}}
         <small id="peer-stats-{{Peer.ID}}" class="peer-stats">

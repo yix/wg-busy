@@ -1,6 +1,7 @@
 package models
 
 import (
+	"errors"
 	"strings"
 	"testing"
 )
@@ -71,6 +72,44 @@ func TestDeviceForGateway(t *testing.T) {
 		if got := DeviceForGateway(tt.gateway, nets); got != tt.want {
 			t.Errorf("DeviceForGateway(%q) = %q, want %q", tt.gateway, got, tt.want)
 		}
+	}
+}
+
+func TestResolveGatewayLongestPrefixAndAmbiguity(t *testing.T) {
+	nets := []GatewayNet{
+		{Device: "wg0", CIDR: "10.0.0.0/16"},
+		{Device: "zt1", CIDR: "10.0.1.0/24"},
+		{Device: "zt2", CIDR: "192.168.1.0/24"},
+		{Device: "zt3", CIDR: "192.168.1.0/24"},
+		{Device: "zt4", CIDR: "172.16.0.0/24"},
+		{Device: "zt4", CIDR: "172.16.0.0/24"}, // same device, duplicate CIDR
+	}
+
+	// Longest prefix match: 10.0.1.5 matches 10.0.0.0/16 (wg0) and 10.0.1.0/24 (zt1) -> zt1
+	dev, err := ResolveGateway("10.0.1.5", nets)
+	if err != nil || dev != "zt1" {
+		t.Fatalf("ResolveGateway(10.0.1.5) = %q, err = %v; want zt1, nil", dev, err)
+	}
+
+	// Ambiguous match: 192.168.1.5 matches zt2 (/24) and zt3 (/24)
+	dev, err = ResolveGateway("192.168.1.5", nets)
+	if err == nil || !errors.Is(err, ErrGatewayAmbiguous) {
+		t.Fatalf("ResolveGateway(192.168.1.5) err = %v; want ErrGatewayAmbiguous", err)
+	}
+	if DeviceForGateway("192.168.1.5", nets) != "" {
+		t.Fatalf("DeviceForGateway for ambiguous gateway returned %q, want empty", DeviceForGateway("192.168.1.5", nets))
+	}
+
+	// Equal prefix length pointing to the same device is not ambiguous
+	dev, err = ResolveGateway("172.16.0.5", nets)
+	if err != nil || dev != "zt4" {
+		t.Fatalf("ResolveGateway(172.16.0.5) = %q, err = %v; want zt4, nil", dev, err)
+	}
+
+	// Unresolved match
+	dev, err = ResolveGateway("8.8.8.8", nets)
+	if err == nil || !errors.Is(err, ErrGatewayUnresolved) {
+		t.Fatalf("ResolveGateway(8.8.8.8) err = %v; want ErrGatewayUnresolved", err)
 	}
 }
 

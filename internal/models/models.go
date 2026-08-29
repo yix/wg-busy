@@ -2,6 +2,7 @@ package models
 
 import (
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"net"
 	"regexp"
@@ -292,19 +293,58 @@ func GatewayNets(serverAddr string, ztNets []GatewayNet) []GatewayNet {
 	return nets
 }
 
-// DeviceForGateway returns the interface the gateway IP is directly reachable
-// on, or "" if it is not on-link for any known network.
-func DeviceForGateway(gateway string, nets []GatewayNet) string {
+var (
+	ErrGatewayUnresolved = errors.New("gateway is not on-link for any known network")
+	ErrGatewayAmbiguous  = errors.New("gateway is ambiguous across multiple networks")
+	ErrGatewayInvalid    = errors.New("invalid gateway IP")
+)
+
+// ResolveGateway returns the interface the gateway IP is directly reachable on using
+// longest-prefix match. If multiple equally specific networks match different devices,
+// ErrGatewayAmbiguous is returned.
+func ResolveGateway(gateway string, nets []GatewayNet) (string, error) {
 	ip := net.ParseIP(strings.TrimSpace(gateway))
 	if ip == nil {
-		return ""
+		return "", ErrGatewayInvalid
 	}
+	bestPrefixLen := -1
+	var matchedDevice string
+	isAmbiguous := false
+
 	for _, n := range nets {
-		if _, cidr, err := net.ParseCIDR(strings.TrimSpace(n.CIDR)); err == nil && cidr.Contains(ip) {
-			return n.Device
+		_, cidr, err := net.ParseCIDR(strings.TrimSpace(n.CIDR))
+		if err != nil || !cidr.Contains(ip) {
+			continue
+		}
+		ones, _ := cidr.Mask.Size()
+		if ones > bestPrefixLen {
+			bestPrefixLen = ones
+			matchedDevice = n.Device
+			isAmbiguous = false
+		} else if ones == bestPrefixLen {
+			if n.Device != matchedDevice {
+				isAmbiguous = true
+			}
 		}
 	}
-	return ""
+
+	if isAmbiguous {
+		return "", fmt.Errorf("%w: gateway %s matches multiple devices with prefix length /%d", ErrGatewayAmbiguous, gateway, bestPrefixLen)
+	}
+	if bestPrefixLen == -1 {
+		return "", fmt.Errorf("%w: gateway %s is not inside %s", ErrGatewayUnresolved, gateway, describeGateways(nets))
+	}
+	return matchedDevice, nil
+}
+
+// DeviceForGateway returns the interface the gateway IP is directly reachable
+// on using longest-prefix match, or "" if it is unresolved or ambiguous.
+func DeviceForGateway(gateway string, nets []GatewayNet) string {
+	dev, err := ResolveGateway(gateway, nets)
+	if err != nil {
+		return ""
+	}
+	return dev
 }
 
 // ValidationError represents a single field validation error.
@@ -545,11 +585,20 @@ func (p *Peer) Validate(gateways []GatewayNet) ValidationErrors {
 			gw := net.ParseIP(strings.TrimSpace(parts[1]))
 			if gw == nil {
 				errs = append(errs, ValidationError{Field: "policyRoutes", Message: fmt.Sprintf("invalid Gateway IP: %s", parts[1])})
-			} else if len(gateways) > 0 && DeviceForGateway(gw.String(), gateways) == "" {
-				errs = append(errs, ValidationError{
-					Field:   "policyRoutes",
-					Message: fmt.Sprintf("gateway %s is not directly reachable: it must be inside %s", gw, describeGateways(gateways)),
-				})
+			} else if len(gateways) > 0 {
+				if _, err := ResolveGateway(gw.String(), gateways); err != nil {
+					if errors.Is(err, ErrGatewayAmbiguous) {
+						errs = append(errs, ValidationError{
+							Field:   "policyRoutes",
+							Message: err.Error(),
+						})
+					} else {
+						errs = append(errs, ValidationError{
+							Field:   "policyRoutes",
+							Message: fmt.Sprintf("gateway %s is not directly reachable: it must be inside %s", gw, describeGateways(gateways)),
+						})
+					}
+				}
 			}
 		}
 	}

@@ -317,6 +317,47 @@ func TestRenderWGConfigPreparesConfiguredPath(t *testing.T) {
 	}
 }
 
+func TestIsPeerRoutingApplied(t *testing.T) {
+	s := &Store{
+		config: validStoreConfig(),
+	}
+	p1 := models.Peer{
+		ID: "p1", Name: "alice", Enabled: true, AllowedIPs: "10.0.0.2/32",
+		StrictPolicyRouting: true, PolicyRoutes: []string{"10.5.5.0/24 via 10.0.0.1"},
+		PolicyRoutingTableID: 100,
+	}
+	p2 := models.Peer{
+		ID: "p2", Name: "bob", Enabled: true, AllowedIPs: "10.0.0.3/32",
+	}
+	s.config.Peers = []models.Peer{p1, p2}
+	s.routingState = s.config.Clone()
+
+	// Initial state with restart pending -> false for all peers
+	s.wgRestartPending = true
+	if s.IsPeerRoutingApplied("p1") {
+		t.Fatal("IsPeerRoutingApplied returned true while restart pending")
+	}
+	appliedMap := s.PeerRoutingAppliedMap()
+	if appliedMap["p1"] || appliedMap["p2"] {
+		t.Fatalf("PeerRoutingAppliedMap returned true while restart pending: %#v", appliedMap)
+	}
+
+	// Restarted / converged state
+	s.MarkWireGuardRestarted()
+	if !s.IsPeerRoutingApplied("p1") || !s.IsPeerRoutingApplied("p2") {
+		t.Fatal("IsPeerRoutingApplied returned false for converged peers")
+	}
+
+	// Mutating desired state without reconciling routing state
+	s.config.Peers[0].StrictPolicyRouting = false
+	if s.IsPeerRoutingApplied("p1") {
+		t.Fatal("IsPeerRoutingApplied returned true for diverged strict policy routing")
+	}
+	if !s.IsPeerRoutingApplied("p2") {
+		t.Fatal("IsPeerRoutingApplied returned false for untouched peer p2")
+	}
+}
+
 func stubLiveServices(t *testing.T, running bool) {
 	t.Helper()
 	originalReload, originalBGP := reloadWireGuard, configureBGP

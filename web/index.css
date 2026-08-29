@@ -991,6 +991,11 @@ dialog article footer {
   color: #fff;
 }
 
+.badge-pending {
+  background: var(--warning);
+  color: #1a1a1a;
+}
+
 /* Route filter helpers */
 .route-filtered {
   opacity: 0.45;

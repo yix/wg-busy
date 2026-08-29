@@ -18,20 +18,21 @@ import (
 
 // peerRowData is the template data for a single peer row.
 type peerRowData struct {
-	Peer         models.Peer
-	ID           string
-	AllowedIPs   string
-	CreatedAt    time.Time
-	ExitNodeName string
-	Endpoint     string
-	TransferRx   string
-	TransferTx   string
-	CurrentRxPS  string
-	CurrentTxPS  string
-	LastSeen     string
-	LastSeenAt   string
-	SparklineSVG string
-	HasStats     bool
+	Peer          models.Peer
+	ID            string
+	AllowedIPs    string
+	CreatedAt     time.Time
+	ExitNodeName  string
+	Endpoint      string
+	TransferRx    string
+	TransferTx    string
+	CurrentRxPS   string
+	CurrentTxPS   string
+	LastSeen      string
+	LastSeenAt    string
+	SparklineSVG  string
+	HasStats      bool
+	StrictApplied bool
 }
 
 // peersListData is the template data for the peers list.
@@ -75,17 +76,26 @@ func (h *handler) buildPeersListData() peersListData {
 		}
 	}
 
+	var appliedMap map[string]bool
+	if h.store != nil {
+		appliedMap = h.store.PeerRoutingAppliedMap()
+	}
+
 	for _, p := range cfg.Peers {
-		row := h.buildPeerRow(p, exitNodeNames[p.ExitNodeID], allPeerStats[p.PublicKey])
+		var strictApplied bool
+		if appliedMap != nil {
+			strictApplied = appliedMap[p.ID]
+		}
+		row := h.buildPeerRow(p, exitNodeNames[p.ExitNodeID], allPeerStats[p.PublicKey], strictApplied)
 		data.Peers = append(data.Peers, row)
 	}
 	return data
 }
 
-func (h *handler) buildPeerRow(peer models.Peer, exitNodeName string, stats wgstats.PeerStats) peerRowData {
+func (h *handler) buildPeerRow(peer models.Peer, exitNodeName string, stats wgstats.PeerStats, strictApplied bool) peerRowData {
 	row := peerRowData{
 		Peer: peer, ID: peer.ID, AllowedIPs: peer.AllowedIPs, CreatedAt: peer.CreatedAt,
-		ExitNodeName: exitNodeName,
+		ExitNodeName: exitNodeName, StrictApplied: strictApplied,
 	}
 	lastSeen := peer.LastSeen
 	if stats.PublicKey != "" {
@@ -444,7 +454,11 @@ func (h *handler) TogglePeer(w http.ResponseWriter, r *http.Request) {
 			stats = *ps
 		}
 	}
-	data := h.buildPeerRow(peer, exitNodeName, stats)
+	var strictApplied bool
+	if h.store != nil {
+		strictApplied = h.store.IsPeerRoutingApplied(peer.ID)
+	}
+	data := h.buildPeerRow(peer, exitNodeName, stats, strictApplied)
 
 	writePageJSON(w, http.StatusOK, "peer-row", data, warning)
 }

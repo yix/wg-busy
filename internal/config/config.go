@@ -6,6 +6,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"slices"
 	"sync"
 	"time"
 
@@ -162,6 +163,62 @@ func (s *Store) Read(fn func(cfg *models.AppConfig)) {
 	snapshot := s.config.Clone()
 	s.mu.RUnlock()
 	fn(&snapshot)
+}
+
+// IsPeerRoutingApplied reports whether the peer's routing and strict policy state
+// in the kernel matches the current desired configuration.
+func (s *Store) IsPeerRoutingApplied(peerID string) bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.wgRestartPending {
+		return false
+	}
+	desired := models.FindPeerByID(s.config.Peers, peerID)
+	if desired == nil {
+		return false
+	}
+	applied := models.FindPeerByID(s.routingState.Peers, peerID)
+	if applied == nil {
+		return false
+	}
+	return desired.Enabled == applied.Enabled &&
+		desired.StrictPolicyRouting == applied.StrictPolicyRouting &&
+		desired.ExitNodeID == applied.ExitNodeID &&
+		desired.RoutingTableID == applied.RoutingTableID &&
+		desired.PolicyRoutingTableID == applied.PolicyRoutingTableID &&
+		slices.Equal(desired.PolicyRoutes, applied.PolicyRoutes) &&
+		slices.Equal(desired.ExitNodeRoutes, applied.ExitNodeRoutes) &&
+		desired.AllowedIPs == applied.AllowedIPs
+}
+
+// PeerRoutingAppliedMap returns a map of peer ID to whether its routing state
+// has been successfully reconciled to the kernel.
+func (s *Store) PeerRoutingAppliedMap() map[string]bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	result := make(map[string]bool, len(s.config.Peers))
+	if s.wgRestartPending {
+		for _, p := range s.config.Peers {
+			result[p.ID] = false
+		}
+		return result
+	}
+	for _, desired := range s.config.Peers {
+		applied := models.FindPeerByID(s.routingState.Peers, desired.ID)
+		if applied == nil {
+			result[desired.ID] = false
+			continue
+		}
+		result[desired.ID] = desired.Enabled == applied.Enabled &&
+			desired.StrictPolicyRouting == applied.StrictPolicyRouting &&
+			desired.ExitNodeID == applied.ExitNodeID &&
+			desired.RoutingTableID == applied.RoutingTableID &&
+			desired.PolicyRoutingTableID == applied.PolicyRoutingTableID &&
+			slices.Equal(desired.PolicyRoutes, applied.PolicyRoutes) &&
+			slices.Equal(desired.ExitNodeRoutes, applied.ExitNodeRoutes) &&
+			desired.AllowedIPs == applied.AllowedIPs
+	}
+	return result
 }
 
 // RecordPeerStats updates in-memory peer last seen times and traffic counters

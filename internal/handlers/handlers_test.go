@@ -124,6 +124,7 @@ func TestPeerLastSeenUsesNewestTimestampAndExactHoverText(t *testing.T) {
 		models.Peer{PublicKey: "peer-key", AllowedIPs: "10.0.0.2/32", LastSeen: persisted},
 		"",
 		wgstats.PeerStats{PublicKey: "peer-key", LatestHandshake: observed},
+		true,
 	)
 
 	exact := observed.Format(time.RFC3339)
@@ -150,6 +151,7 @@ func TestPeerRowDisplaysPersistedTrafficCountersWhenLiveStatsUnavailable(t *test
 		},
 		"",
 		wgstats.PeerStats{},
+		false,
 	)
 
 	if row.TransferRx != "5.0 MB" || row.TransferTx != "2.0 MB" {
@@ -581,6 +583,42 @@ func TestWGShowModalTemplate(t *testing.T) {
 		if !strings.Contains(modalTemplate, required) {
 			t.Fatalf("wg-show-modal-template is missing required element: %q", required)
 		}
+	}
+}
+
+func TestPeerRowStrictPolicyRoutingStatusBadges(t *testing.T) {
+	templateSource, err := os.ReadFile("../../web/templates.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := string(templateSource)
+
+	if !strings.Contains(source, `<span class="badge badge-warn" title="Traffic may only use this peer's own routes">Strict</span>`) {
+		t.Fatal("peer-row-template is missing applied Strict badge")
+	}
+	if !strings.Contains(source, `<span class="badge badge-pending" title="Saved, not applied — strict routing is pending or failed live apply">Saved, not applied</span>`) {
+		t.Fatal("peer-row-template is missing unapplied Strict badge")
+	}
+
+	h := &handler{}
+	appliedRow := h.buildPeerRow(
+		models.Peer{ID: "p1", Name: "Strict Peer", StrictPolicyRouting: true},
+		"",
+		wgstats.PeerStats{},
+		true,
+	)
+	if !appliedRow.StrictApplied {
+		t.Fatalf("appliedRow.StrictApplied = false, want true")
+	}
+
+	unappliedRow := h.buildPeerRow(
+		models.Peer{ID: "p2", Name: "Pending Peer", StrictPolicyRouting: true},
+		"",
+		wgstats.PeerStats{},
+		false,
+	)
+	if unappliedRow.StrictApplied {
+		t.Fatalf("unappliedRow.StrictApplied = true, want false")
 	}
 }
 

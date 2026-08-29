@@ -1,7 +1,6 @@
 package routing
 
 import (
-	"errors"
 	"fmt"
 	"net"
 	"os/exec"
@@ -105,6 +104,205 @@ func peerRules(cfg models.AppConfig, exitNodes map[string]models.Peer) []peerRul
 	return rules
 }
 
+const (
+	strictChainV4       = "WG_BUSY_STRICT4"
+	strictChainV6       = "WG_BUSY_STRICT6"
+	strictApplyComment  = "wg-busy strict apply"
+)
+
+// strictEgressRule represents one firewall rule in WG_BUSY_STRICT4 or WG_BUSY_STRICT6.
+type strictEgressRule struct {
+	IsV6   bool
+	Source string
+	Dest   string // empty for terminal reject
+	OutDev string // empty for terminal reject
+	Action string // "RETURN" or "REJECT"
+}
+
+// strictEgressRules returns all allow-return and terminal reject rules for strict peers.
+func strictEgressRules(cfg models.AppConfig, gateways []models.GatewayNet, exitNodes map[string]models.Peer) []strictEgressRule {
+	var rules []strictEgressRule
+
+	for _, p := range cfg.Peers {
+		if !p.Enabled || !p.StrictPolicyRouting {
+			continue
+		}
+		sources := models.PeerSources(p.AllowedIPs)
+		if len(sources) == 0 {
+			continue
+		}
+
+		for _, src := range sources {
+			isV6 := strings.Contains(src, ":")
+
+			// 1. Exit node routes for strict peer
+			if p.ExitNodeID != "" {
+				if exitNode, ok := exitNodes[p.ExitNodeID]; ok {
+					if exitNode.ExitNodeAllowAll {
+						if !isV6 {
+							rules = append(rules, strictEgressRule{IsV6: false, Source: src, Dest: "0.0.0.0/0", OutDev: models.WGDevice, Action: "RETURN"})
+						} else {
+							rules = append(rules, strictEgressRule{IsV6: true, Source: src, Dest: "::/0", OutDev: models.WGDevice, Action: "RETURN"})
+						}
+					} else {
+						for _, r := range exitNode.ExitNodeRoutes {
+							r = strings.TrimSpace(r)
+							if r == "" {
+								continue
+							}
+							ip, _, err := net.ParseCIDR(r)
+							if err != nil {
+								continue
+							}
+							routeIsV6 := ip.To4() == nil
+							if routeIsV6 == isV6 {
+								rules = append(rules, strictEgressRule{IsV6: isV6, Source: src, Dest: r, OutDev: models.WGDevice, Action: "RETURN"})
+							}
+						}
+					}
+				}
+			}
+
+			// 2. Policy routes for strict peer
+			for _, routeStr := range p.PolicyRoutes {
+				parts := strings.Split(routeStr, " via ")
+				if len(parts) != 2 {
+					continue
+				}
+				subnet := strings.TrimSpace(parts[0])
+				gw := strings.TrimSpace(parts[1])
+
+				ip, _, err := net.ParseCIDR(subnet)
+				if err != nil {
+					continue
+				}
+				routeIsV6 := ip.To4() == nil
+				if routeIsV6 != isV6 {
+					continue
+				}
+
+				dev, err := models.ResolveGateway(gw, gateways)
+				if err != nil || dev == "" {
+					// Missing or ambiguous gateway: do not emit allow rule.
+					continue
+				}
+				rules = append(rules, strictEgressRule{IsV6: isV6, Source: src, Dest: subnet, OutDev: dev, Action: "RETURN"})
+			}
+
+			// 3. Terminal reject for this strict source
+			rules = append(rules, strictEgressRule{IsV6: isV6, Source: src, Action: "REJECT"})
+		}
+	}
+	return rules
+}
+
+// strictFirewallCommands generates commands to initialize or teardown the strict egress chains.
+func strictFirewallCommands(cfg models.AppConfig, gateways []models.GatewayNet, add bool) []string {
+	var cmds []string
+	if add {
+		// Initialize IPv4 chain and FORWARD jump
+		cmds = append(cmds,
+			fmt.Sprintf("iptables -w -N %s 2>/dev/null || true", strictChainV4),
+			fmt.Sprintf("iptables -w -C FORWARD -i %s -j %s 2>/dev/null || iptables -w -I FORWARD 1 -i %s -j %s", models.WGDevice, strictChainV4, models.WGDevice, strictChainV4),
+			fmt.Sprintf("iptables -w -F %s", strictChainV4),
+		)
+		// Initialize IPv6 chain and FORWARD jump
+		cmds = append(cmds,
+			fmt.Sprintf("ip6tables -w -N %s 2>/dev/null || true", strictChainV6),
+			fmt.Sprintf("ip6tables -w -C FORWARD -i %s -j %s 2>/dev/null || ip6tables -w -I FORWARD 1 -i %s -j %s", models.WGDevice, strictChainV6, models.WGDevice, strictChainV6),
+			fmt.Sprintf("ip6tables -w -F %s", strictChainV6),
+		)
+
+		exitNodes := enabledExitNodes(cfg)
+		for _, r := range strictEgressRules(cfg, gateways, exitNodes) {
+			if !r.IsV6 {
+				if r.Action == "RETURN" {
+					cmds = append(cmds, fmt.Sprintf("iptables -w -A %s -s %s -d %s -o %s -j RETURN", strictChainV4, r.Source, r.Dest, r.OutDev))
+				} else {
+					cmds = append(cmds, fmt.Sprintf("iptables -w -A %s -s %s -j REJECT --reject-with icmp-admin-prohibited", strictChainV4, r.Source))
+				}
+			} else {
+				if r.Action == "RETURN" {
+					cmds = append(cmds, fmt.Sprintf("ip6tables -w -A %s -s %s -d %s -o %s -j RETURN", strictChainV6, r.Source, r.Dest, r.OutDev))
+				} else {
+					cmds = append(cmds, fmt.Sprintf("ip6tables -w -A %s -s %s -j REJECT --reject-with icmp6-adm-prohibited", strictChainV6, r.Source))
+				}
+			}
+		}
+		return cmds
+	}
+
+	// Teardown
+	cmds = append(cmds,
+		fmt.Sprintf("iptables -w -D FORWARD -i %s -j %s 2>/dev/null || true", models.WGDevice, strictChainV4),
+		fmt.Sprintf("iptables -w -F %s 2>/dev/null || true", strictChainV4),
+		fmt.Sprintf("iptables -w -X %s 2>/dev/null || true", strictChainV4),
+		fmt.Sprintf("ip6tables -w -D FORWARD -i %s -j %s 2>/dev/null || true", models.WGDevice, strictChainV6),
+		fmt.Sprintf("ip6tables -w -F %s 2>/dev/null || true", strictChainV6),
+		fmt.Sprintf("ip6tables -w -X %s 2>/dev/null || true", strictChainV6),
+	)
+	return cmds
+}
+
+// strictPeerSources returns all unique source selectors for enabled strict peers.
+func strictPeerSources(cfg models.AppConfig) []string {
+	var sources []string
+	seen := make(map[string]bool)
+	for _, p := range cfg.Peers {
+		if !p.Enabled || !p.StrictPolicyRouting {
+			continue
+		}
+		for _, src := range models.PeerSources(p.AllowedIPs) {
+			if !seen[src] {
+				seen[src] = true
+				sources = append(sources, src)
+			}
+		}
+	}
+	return sources
+}
+
+func unionSources(a, b []string) []string {
+	seen := make(map[string]bool)
+	var res []string
+	for _, s := range append(a, b...) {
+		if !seen[s] {
+			seen[s] = true
+			res = append(res, s)
+		}
+	}
+	return res
+}
+
+func temporaryRejectCommands(sources []string, add bool) []string {
+	var cmds []string
+	for _, src := range sources {
+		isV6 := strings.Contains(src, ":")
+		if add {
+			if !isV6 {
+				cmds = append(cmds, fmt.Sprintf(
+					"iptables -w -I FORWARD 1 -i %s -s %s -m comment --comment '%s' -j REJECT --reject-with icmp-admin-prohibited",
+					models.WGDevice, src, strictApplyComment))
+			} else {
+				cmds = append(cmds, fmt.Sprintf(
+					"ip6tables -w -I FORWARD 1 -i %s -s %s -m comment --comment '%s' -j REJECT --reject-with icmp6-adm-prohibited",
+					models.WGDevice, src, strictApplyComment))
+			}
+		} else {
+			if !isV6 {
+				cmds = append(cmds, fmt.Sprintf(
+					"iptables -w -D FORWARD -i %s -s %s -m comment --comment '%s' -j REJECT --reject-with icmp-admin-prohibited 2>/dev/null || true",
+					models.WGDevice, src, strictApplyComment))
+			} else {
+				cmds = append(cmds, fmt.Sprintf(
+					"ip6tables -w -D FORWARD -i %s -s %s -m comment --comment '%s' -j REJECT --reject-with icmp6-adm-prohibited 2>/dev/null || true",
+					models.WGDevice, src, strictApplyComment))
+			}
+		}
+	}
+	return cmds
+}
+
 // masqueradeRule is the NAT rule for traffic leaving over ZeroTier. Packets
 // routed out a zt interface still carry their original source (a WireGuard peer
 // IP, say), which the ZeroTier network has no route back to — so they are
@@ -174,7 +372,7 @@ func zeroTierMasquerade(cfg models.AppConfig, gateways []models.GatewayNet, adve
 // the bring-up and leave the machine with no WireGuard at all. A route that
 // cannot be installed now is installed by the next apply; losing the whole
 // interface is never the better failure.
-func policyRouteCmd(action, subnet, gateway string, table uint, gateways []models.GatewayNet) string {
+func policyRouteCmd(action, subnet, gateway string, table uint, gateways []models.GatewayNet, isStrict bool) string {
 	ipCommand := "ip"
 	if ip, _, err := net.ParseCIDR(subnet); err == nil && ip.To4() == nil {
 		ipCommand = "ip -6"
@@ -187,9 +385,12 @@ func policyRouteCmd(action, subnet, gateway string, table uint, gateways []model
 	}
 	dev := models.DeviceForGateway(gateway, gateways)
 	if dev == "" {
-		// ponytail: unknown gateway falls back to wg0 — validation rejects these,
-		// but a hand-edited config.yaml or a ZeroTier network that has not come up
-		// yet still lands here, and the guard keeps it harmless.
+		if isStrict {
+			// Strict policy routing must not fall back to wg0; omit route installation
+			// so the peer fails closed.
+			return ""
+		}
+		// Non-strict fallback to wg0 for best-effort compatibility.
 		dev = models.WGDevice
 	}
 	return fmt.Sprintf("%s route %s %s via %s dev %s table %d || true", ipCommand, action, subnet, gateway, dev, table)
@@ -258,7 +459,10 @@ func policyRouteCmds(action string, cfg models.AppConfig, gateways []models.Gate
 		for _, routeStr := range p.PolicyRoutes {
 			parts := strings.Split(routeStr, " via ")
 			if len(parts) == 2 {
-				cmds = append(cmds, policyRouteCmd(action, strings.TrimSpace(parts[0]), strings.TrimSpace(parts[1]), p.PolicyRoutingTableID, gateways))
+				cmd := policyRouteCmd(action, strings.TrimSpace(parts[0]), strings.TrimSpace(parts[1]), p.PolicyRoutingTableID, gateways, p.StrictPolicyRouting)
+				if cmd != "" {
+					cmds = append(cmds, cmd)
+				}
 			}
 		}
 	}
@@ -288,6 +492,9 @@ func generatePostUpCommands(cfg models.AppConfig, gateways []models.GatewayNet, 
 	// NAT for anything leaving over ZeroTier.
 	cmds = append(cmds, zeroTierMasquerade(cfg, gateways, advertisedByPeer, true)...)
 
+	// Strict egress firewall chains and rules.
+	cmds = append(cmds, strictFirewallCommands(cfg, gateways, true)...)
+
 	// Policy rules for exit nodes, policy routes, and strict rejects.
 	//
 	// Each add is preceded by a delete of whatever holds that priority: `ip rule
@@ -313,22 +520,64 @@ func applyCommands(cmds []string) error {
 	return nil
 }
 
-// Reconcile removes the previously managed state before installing the next
-// state. If installation fails, it best-effort restores the previous state.
+// Reconcile safely converges live routing and firewall state from previous to next.
+// Strict policy routing reconciliation is fail-closed: affected strict sources are
+// blocked by temporary FORWARD reject rules before any previous state is altered,
+// and the temporary reject rules are removed only after the entire next state has
+// applied successfully.
 func Reconcile(previous models.AppConfig, previousGateways []models.GatewayNet, previousAdvertised map[string][]string, next models.AppConfig, nextGateways []models.GatewayNet, nextAdvertised map[string][]string) error {
 	if !interfaceUp() {
 		return nil
 	}
-	if err := applyCommands(generatePostDownCommands(previous, previousGateways, previousAdvertised)); err != nil {
+
+	affectedStrictSources := unionSources(strictPeerSources(previous), strictPeerSources(next))
+
+	// Step 1: Install temporary reject rules for all affected strict sources
+	if len(affectedStrictSources) > 0 {
+		if err := applyCommands(temporaryRejectCommands(affectedStrictSources, true)); err != nil {
+			return fmt.Errorf("installing temporary strict guards: %w", err)
+		}
+	}
+
+	// Step 2: Remove previous routing state (masquerade bypasses, rules, routes)
+	previousExitNodes := enabledExitNodes(previous)
+	var teardownCmds []string
+	teardownCmds = append(teardownCmds, zeroTierMasquerade(previous, previousGateways, previousAdvertised, false)...)
+	for _, r := range peerRules(previous, previousExitNodes) {
+		teardownCmds = append(teardownCmds, fmt.Sprintf("%s rule del %s %s priority %d || true", r.IPCommand, r.Selector, r.Action, r.Priority))
+	}
+	teardownCmds = append(teardownCmds, exitNodeRouteCmds("del", previousExitNodes)...)
+	teardownCmds = append(teardownCmds, policyRouteCmds("del", previous, previousGateways)...)
+	if err := applyCommands(teardownCmds); err != nil {
 		return fmt.Errorf("removing previous routing state: %w", err)
 	}
-	if err := applyCommands(generatePostUpCommands(next, nextGateways, nextAdvertised)); err != nil {
-		restoreErr := applyCommands(generatePostUpCommands(previous, previousGateways, previousAdvertised))
-		if restoreErr != nil {
-			return errors.Join(fmt.Errorf("installing new routing state: %w", err), fmt.Errorf("restoring previous routing state: %w", restoreErr))
-		}
+
+	// Step 3: Refresh permanent strict egress chains
+	if err := applyCommands(strictFirewallCommands(next, nextGateways, true)); err != nil {
+		return fmt.Errorf("updating strict firewall chains: %w", err)
+	}
+
+	// Step 4: Install next routing state (exit node routes, masquerade, rules, routes)
+	nextExitNodes := enabledExitNodes(next)
+	var setupCmds []string
+	setupCmds = append(setupCmds, exitNodeRouteCmds("replace", nextExitNodes)...)
+	setupCmds = append(setupCmds, zeroTierMasquerade(next, nextGateways, nextAdvertised, true)...)
+	for _, r := range peerRules(next, nextExitNodes) {
+		setupCmds = append(setupCmds, fmt.Sprintf("%s rule del priority %d 2>/dev/null || true; %s rule add %s %s priority %d",
+			r.IPCommand, r.Priority, r.IPCommand, r.Selector, r.Action, r.Priority))
+	}
+	setupCmds = append(setupCmds, policyRouteCmds("replace", next, nextGateways)...)
+	if err := applyCommands(setupCmds); err != nil {
 		return fmt.Errorf("installing new routing state: %w", err)
 	}
+
+	// Step 5: If all applied successfully, remove temporary reject rules
+	if len(affectedStrictSources) > 0 {
+		if err := applyCommands(temporaryRejectCommands(affectedStrictSources, false)); err != nil {
+			return fmt.Errorf("removing temporary strict guards: %w", err)
+		}
+	}
+
 	return nil
 }
 
@@ -361,5 +610,8 @@ func generatePostDownCommands(cfg models.AppConfig, gateways []models.GatewayNet
 	cmds = append(cmds, exitNodeRouteCmds("del", exitNodes)...)
 
 	// Remove the routes from each peer's own policy table.
-	return append(cmds, policyRouteCmds("del", cfg, gateways)...)
+	cmds = append(cmds, policyRouteCmds("del", cfg, gateways)...)
+
+	// Strict firewall teardown.
+	return append(cmds, strictFirewallCommands(cfg, gateways, false)...)
 }
