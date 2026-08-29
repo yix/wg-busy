@@ -12,14 +12,14 @@ import (
 
 // Passkey represents a registered WebAuthn / FIDO2 credential for admin authentication.
 type Passkey struct {
-	ID         string     `yaml:"id" json:"id"`                 // Base64URL credential ID
-	Name       string     `yaml:"name" json:"name"`             // User-assigned label (e.g. "MacBook Pro Touch ID")
-	PublicKey  string     `yaml:"publicKey" json:"publicKey"`   // Base64URL-encoded public key bytes
-	Algorithm  int64      `yaml:"algorithm" json:"algorithm"`   // COSE algorithm identifier (-7: ES256, -257: RS256, -8: EdDSA)
-	SignCount  uint32     `yaml:"signCount" json:"signCount"`   // Monotonic signature counter
-	AAGUID     string     `yaml:"aaguid,omitempty" json:"aaguid,omitempty"`
-	CreatedAt  time.Time  `yaml:"createdAt" json:"createdAt"`
-	LastUsedAt *time.Time `yaml:"lastUsedAt,omitempty" json:"lastUsedAt,omitempty"`
+	ID         string     `yaml:"id"`
+	Name       string     `yaml:"name"`
+	PublicKey  string     `yaml:"publicKey"`
+	Algorithm  int64      `yaml:"algorithm"`
+	SignCount  uint32     `yaml:"signCount"`
+	AAGUID     string     `yaml:"aaguid,omitempty"`
+	CreatedAt  time.Time  `yaml:"createdAt"`
+	LastUsedAt *time.Time `yaml:"lastUsedAt,omitempty"`
 }
 
 // AppConfig is the top-level structure persisted to YAML.

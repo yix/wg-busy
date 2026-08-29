@@ -468,14 +468,14 @@
                     {{#each Server.Passkeys}}
                     <tr>
                         <td>
-                            <strong>{{Name}}</strong>
-                            <div style="font-size: 0.78em; opacity: 0.7; font-family: var(--font-mono);">ID: {{ID}}</div>
+                            <strong>{{#if Name}}{{Name}}{{else}}{{name}}{{/if}}</strong>
+                            <div style="font-size: 0.78em; opacity: 0.7; font-family: var(--font-mono); word-break: break-all;">ID: {{#if ID}}{{ID}}{{else}}{{id}}{{/if}}</div>
                         </td>
-                        <td><small>{{formatTime CreatedAt}}</small></td>
-                        <td><small>{{#if LastUsedAt}}{{formatTime LastUsedAt}}{{else}}<span class="text-muted">Never</span>{{/if}}</small></td>
+                        <td><small>{{#if CreatedAt}}{{formatTime CreatedAt}}{{else}}{{formatTime createdAt}}{{/if}}</small></td>
+                        <td><small>{{#if LastUsedAt}}{{formatTime LastUsedAt}}{{else if lastUsedAt}}{{formatTime lastUsedAt}}{{else}}<span class="text-muted">Never</span>{{/if}}</small></td>
                         <td style="text-align: right;">
                             <button type="button" class="btn btn-outline-danger" style="width:auto; padding: 0.25rem 0.6rem; font-size: 0.85em;"
-                                    onclick="deletePasskey('{{ID}}', '{{Name}}')">
+                                    onclick="deletePasskey('{{#if ID}}{{ID}}{{else}}{{id}}{{/if}}', '{{#if Name}}{{Name}}{{else}}{{name}}{{/if}}')">
                                 Delete
                             </button>
                         </td>
