@@ -407,10 +407,10 @@ func TestStrictPolicyRoutingOrder(t *testing.T) {
 		var prio int
 		switch {
 		case strings.Contains(cmd, "from 10.0.0.5 table 100 priority"):
-			fmt.Sscanf(cmd[strings.LastIndex(cmd, "priority "):], "priority %d", &prio)
+			_, _ = fmt.Sscanf(cmd[strings.LastIndex(cmd, "priority "):], "priority %d", &prio)
 			lookupPrio = prio
 		case strings.Contains(cmd, "from 10.0.0.5 prohibit priority"):
-			fmt.Sscanf(cmd[strings.LastIndex(cmd, "priority "):], "priority %d", &prio)
+			_, _ = fmt.Sscanf(cmd[strings.LastIndex(cmd, "priority "):], "priority %d", &prio)
 			rejectPrio = prio
 		}
 	}

@@ -92,7 +92,7 @@ func TestResolveGatewayLongestPrefixAndAmbiguity(t *testing.T) {
 	}
 
 	// Ambiguous match: 192.168.1.5 matches zt2 (/24) and zt3 (/24)
-	dev, err = ResolveGateway("192.168.1.5", nets)
+	_, err = ResolveGateway("192.168.1.5", nets)
 	if err == nil || !errors.Is(err, ErrGatewayAmbiguous) {
 		t.Fatalf("ResolveGateway(192.168.1.5) err = %v; want ErrGatewayAmbiguous", err)
 	}
@@ -107,7 +107,7 @@ func TestResolveGatewayLongestPrefixAndAmbiguity(t *testing.T) {
 	}
 
 	// Unresolved match
-	dev, err = ResolveGateway("8.8.8.8", nets)
+	_, err = ResolveGateway("8.8.8.8", nets)
 	if err == nil || !errors.Is(err, ErrGatewayUnresolved) {
 		t.Fatalf("ResolveGateway(8.8.8.8) err = %v; want ErrGatewayUnresolved", err)
 	}

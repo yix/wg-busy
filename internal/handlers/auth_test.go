@@ -56,16 +56,12 @@ func generateTestCOSEKey(t *testing.T) (*ecdsa.PrivateKey, []byte, string) {
 		t.Fatal(err)
 	}
 	pubKey := &privKey.PublicKey
-	xBytes := pubKey.X.Bytes()
-	yBytes := pubKey.Y.Bytes()
-	if len(xBytes) < 32 {
-		pad := make([]byte, 32-len(xBytes))
-		xBytes = append(pad, xBytes...)
+	pubBytes, err := pubKey.Bytes()
+	if err != nil {
+		t.Fatalf("pubKey.Bytes error: %v", err)
 	}
-	if len(yBytes) < 32 {
-		pad := make([]byte, 32-len(yBytes))
-		yBytes = append(pad, yBytes...)
-	}
+	xBytes := pubBytes[1:33]
+	yBytes := pubBytes[33:65]
 
 	var coseBuf bytes.Buffer
 	coseBuf.WriteByte(0xa5)
@@ -90,7 +86,7 @@ func buildAttestation(credIDB64 string, coseKeyBytes []byte) string {
 	authData.WriteByte(0x41) // UP | AT
 	authData.Write([]byte{0x00, 0x00, 0x00, 0x01})
 	authData.Write(make([]byte, 16)) // AAGUID
-	binary.Write(&authData, binary.BigEndian, uint16(len(credID)))
+	_ = binary.Write(&authData, binary.BigEndian, uint16(len(credID)))
 	authData.Write(credID)
 	authData.Write(coseKeyBytes)
 

@@ -307,7 +307,7 @@ func routeLocalAddress(peerIP string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 
 	local, ok := conn.LocalAddr().(*net.UDPAddr)
 	if !ok || local.IP == nil || local.IP.IsUnspecified() {

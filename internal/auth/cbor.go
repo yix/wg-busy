@@ -205,13 +205,10 @@ func ParseCOSEKey(m map[any]any) (*COSEKey, error) {
 			return nil, errors.New("invalid EC2 coordinate length")
 		}
 
-		pub := &ecdsa.PublicKey{
-			Curve: elliptic.P256(),
-			X:     new(big.Int).SetBytes(key.X),
-			Y:     new(big.Int).SetBytes(key.Y),
-		}
-		if !pub.Curve.IsOnCurve(pub.X, pub.Y) {
-			return nil, errors.New("EC2 point is not on curve P-256")
+		uncompressed := append([]byte{0x04}, append(key.X, key.Y...)...)
+		pub, err := ecdsa.ParseUncompressedPublicKey(elliptic.P256(), uncompressed)
+		if err != nil {
+			return nil, fmt.Errorf("EC2 point is not on curve P-256: %w", err)
 		}
 		key.PublicKey = pub
 		if key.Alg == 0 {

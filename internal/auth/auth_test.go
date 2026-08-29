@@ -108,18 +108,12 @@ func TestWebAuthnRegistrationAndLogin_ES256(t *testing.T) {
 	}
 	pubKey := &privKey.PublicKey
 
-	// Build COSE key map manually
-	xBytes := pubKey.X.Bytes()
-	yBytes := pubKey.Y.Bytes()
-	// Pad to 32 bytes if needed
-	if len(xBytes) < 32 {
-		pad := make([]byte, 32-len(xBytes))
-		xBytes = append(pad, xBytes...)
+	pubBytes, err := pubKey.Bytes()
+	if err != nil {
+		t.Fatalf("pubKey.Bytes error: %v", err)
 	}
-	if len(yBytes) < 32 {
-		pad := make([]byte, 32-len(yBytes))
-		yBytes = append(pad, yBytes...)
-	}
+	xBytes := pubBytes[1:33]
+	yBytes := pubBytes[33:65]
 
 	// Simple CBOR map encoding for COSE EC2 key
 	// Map(5) { 1: 2, 3: -7, -1: 1, -2: bstr(32), -3: bstr(32) }
@@ -148,7 +142,7 @@ func TestWebAuthnRegistrationAndLogin_ES256(t *testing.T) {
 	authData.WriteByte(0x41) // UP (0x01) | AT (0x40)
 	authData.Write([]byte{0x00, 0x00, 0x00, 0x01}) // signCount = 1
 	authData.Write(make([]byte, 16))               // zero AAGUID
-	binary.Write(&authData, binary.BigEndian, uint16(len(credID)))
+	_ = binary.Write(&authData, binary.BigEndian, uint16(len(credID)))
 	authData.Write(credID)
 	authData.Write(coseBuf.Bytes())
 
