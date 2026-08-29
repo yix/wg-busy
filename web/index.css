@@ -278,7 +278,7 @@ small {
   padding: 0.9rem 1.25rem;
   margin-bottom: 1.75rem;
   box-shadow: var(--box-shadow);
-  transition: all var(--transition);
+  transition: border-color var(--transition), box-shadow var(--transition);
 }
 
 .stats-bar-inner {
@@ -310,16 +310,10 @@ small {
 .status-up {
   background: var(--success);
   box-shadow: 0 0 0 2px var(--card-bg), 0 0 8px var(--success-glow);
-  animation: pulse-dot 2.5s infinite ease-in-out;
 }
 
 .status-down {
   background: var(--danger);
-}
-
-@keyframes pulse-dot {
-  0%, 100% { transform: scale(1); opacity: 1; }
-  50% { transform: scale(1.15); opacity: 0.85; }
 }
 
 /* Energy conservation: pause all animations when window or page is not in focus */
@@ -392,7 +386,7 @@ html.page-unfocused *::after {
   font-size: 0.95rem;
   font-family: inherit;
   font-weight: 500;
-  transition: all var(--transition);
+  transition: color var(--transition), border-color var(--transition), background-color var(--transition);
   border-radius: var(--border-radius-sm) var(--border-radius-sm) 0 0;
   white-space: nowrap;
   flex-shrink: 0;
@@ -520,7 +514,7 @@ button, .btn {
   padding: 0.55rem 1.1rem;
   border-radius: var(--border-radius);
   cursor: pointer;
-  transition: all var(--transition);
+  transition: background-color var(--transition), border-color var(--transition), color var(--transition), box-shadow var(--transition), transform var(--transition);
   border: 1px solid transparent;
   background-color: var(--primary);
   color: var(--primary-text);
@@ -606,8 +600,10 @@ button:active, .btn:active {
   display: block;
 }
 
-/* HTMX Async Loading States */
-.htmx-request {
+/* HTMX Async Loading States (applied only to buttons & forms, not polling elements) */
+button.htmx-request,
+.btn.htmx-request,
+form.htmx-request button[type="submit"] {
   opacity: 0.6;
   pointer-events: none;
   cursor: wait;
