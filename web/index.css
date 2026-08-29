@@ -1204,3 +1204,38 @@ dialog article footer {
     width: calc(100vw - 1.5rem);
   }
 }
+
+/* ==========================================================================
+   Admin Passkey & Login Screen
+   ========================================================================== */
+
+.login-container {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  min-height: 50vh;
+  padding: 2rem 1rem;
+}
+
+.login-card {
+  width: 100%;
+  max-width: 440px;
+  background: var(--card-bg);
+  border: 1px solid var(--border-color);
+  border-radius: var(--border-radius-lg);
+  box-shadow: var(--box-shadow-lg);
+  padding: 2.5rem 2rem;
+}
+
+.login-icon-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 64px;
+  height: 64px;
+  border-radius: var(--border-radius-pill);
+  background: var(--primary-subtle);
+  color: var(--primary);
+  margin-bottom: 1.25rem;
+}
+

@@ -18,22 +18,25 @@
                 <h1>WG Busy</h1>
                 <p>WireGuard Server Manager <span class="app-version">(<span hx-get="version" hx-trigger="templates-ready from:body" hx-swap="innerHTML">dev</span>)</span></p>
             </div>
-            <button class="btn btn-outline secondary theme-toggle-btn" onclick="toggleTheme()" id="theme-toggle" aria-label="Toggle Theme" title="Toggle Theme">
-                <svg class="sun-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                    <circle cx="12" cy="12" r="5"></circle>
-                    <line x1="12" y1="1" x2="12" y2="3"></line>
-                    <line x1="12" y1="21" x2="12" y2="23"></line>
-                    <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line>
-                    <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line>
-                    <line x1="1" y1="12" x2="3" y2="12"></line>
-                    <line x1="21" y1="12" x2="23" y2="12"></line>
-                    <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
-                    <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
-                </svg>
-                <svg class="moon-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                    <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
-                </svg>
-            </button>
+            <div style="display:flex; align-items:center; gap:0.5rem;">
+                <button id="logout-btn" class="btn btn-outline secondary" style="display:none; padding: 0.25rem 0.65rem; font-size: 0.85em;" onclick="handleLogout()" title="Log Out">Log Out</button>
+                <button class="btn btn-outline secondary theme-toggle-btn" onclick="toggleTheme()" id="theme-toggle" aria-label="Toggle Theme" title="Toggle Theme">
+                    <svg class="sun-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <circle cx="12" cy="12" r="5"></circle>
+                        <line x1="12" y1="1" x2="12" y2="3"></line>
+                        <line x1="12" y1="21" x2="12" y2="23"></line>
+                        <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line>
+                        <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line>
+                        <line x1="1" y1="12" x2="3" y2="12"></line>
+                        <line x1="21" y1="12" x2="23" y2="12"></line>
+                        <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
+                        <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
+                    </svg>
+                    <svg class="moon-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
+                    </svg>
+                </button>
+            </div>
         </hgroup>
 
         <input type="hidden" id="active-stats-kind" name="kind" value="peers">
@@ -416,6 +419,271 @@
             renderPageResponse = Handlebars.compile(document.getElementById('page-template').textContent);
         }
 
+        // Base64URL encoding & decoding helpers for WebAuthn
+        function bufferToBase64URL(buffer) {
+            var bytes = new Uint8Array(buffer);
+            var str = '';
+            for (var i = 0; i < bytes.byteLength; i++) {
+                str += String.fromCharCode(bytes[i]);
+            }
+            return btoa(str).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+        }
+
+        function base64URLToBuffer(base64url) {
+            var base64 = base64url.replace(/-/g, '+').replace(/_/g, '/');
+            while (base64.length % 4) {
+                base64 += '=';
+            }
+            var binary = atob(base64);
+            var bytes = new Uint8Array(binary.length);
+            for (var i = 0; i < binary.length; i++) {
+                bytes[i] = binary.charCodeAt(i);
+            }
+            return bytes.buffer;
+        }
+
+        // Passkey & Auth State Management
+        function checkAuthAndPasskeys() {
+            fetch('api/auth/status')
+                .then(function (res) { return res.json(); })
+                .then(function (status) {
+                    var logoutBtn = document.getElementById('logout-btn');
+                    if (logoutBtn) {
+                        logoutBtn.style.display = (status.requirePasskey && status.hasPasskeys && status.authenticated) ? 'inline-block' : 'none';
+                    }
+
+                    // If not authenticated and passkey login is required, show login card
+                    if (status.requirePasskey && status.hasPasskeys && !status.authenticated) {
+                        var tabContent = document.getElementById('tab-content');
+                        var loginTmpl = Handlebars.compile(document.getElementById('login-card-template').textContent);
+                        if (tabContent && loginTmpl) {
+                            tabContent.innerHTML = loginTmpl({});
+                        }
+                        var statsBar = document.getElementById('stats-bar');
+                        if (statsBar) statsBar.style.display = 'none';
+                        var tabs = document.querySelector('.tabs');
+                        if (tabs) tabs.style.display = 'none';
+                        return;
+                    } else {
+                        var statsBar = document.getElementById('stats-bar');
+                        if (statsBar) statsBar.style.display = '';
+                        var tabs = document.querySelector('.tabs');
+                        if (tabs) tabs.style.display = '';
+                    }
+
+                    // If no passkeys configured, prompt user up to 3 times
+                    if (!status.hasPasskeys) {
+                        var count = parseInt(localStorage.getItem('wg_passkey_prompt_count') || '0', 10);
+                        if (count < 3) {
+                            var container = document.getElementById('modal-container');
+                            if (container && !container.querySelector('dialog')) {
+                                var promptTmpl = Handlebars.compile(document.getElementById('passkey-prompt-modal-template').textContent);
+                                container.innerHTML = promptTmpl({});
+                                var dialog = container.querySelector('dialog');
+                                if (dialog) dialog.showModal();
+                            }
+                        }
+                    }
+                })
+                .catch(function (err) {
+                    console.error('Failed to check auth status:', err);
+                });
+        }
+
+        function dismissPasskeyPrompt(never) {
+            if (never) {
+                localStorage.setItem('wg_passkey_prompt_count', '3');
+            } else {
+                var count = parseInt(localStorage.getItem('wg_passkey_prompt_count') || '0', 10);
+                localStorage.setItem('wg_passkey_prompt_count', (count + 1).toString());
+            }
+            closeModal();
+        }
+
+        function openAddPasskeyModal() {
+            closeModal();
+            var defaultName = 'Admin Passkey';
+            if (navigator.userAgent.indexOf('Macintosh') !== -1) defaultName = 'MacBook Touch ID';
+            else if (navigator.userAgent.indexOf('Windows') !== -1) defaultName = 'Windows Hello';
+            else if (navigator.userAgent.indexOf('iPhone') !== -1 || navigator.userAgent.indexOf('iPad') !== -1) defaultName = 'Apple Passkey';
+            else if (navigator.userAgent.indexOf('Android') !== -1) defaultName = 'Android Passkey';
+
+            var container = document.getElementById('modal-container');
+            var addTmpl = Handlebars.compile(document.getElementById('passkey-add-modal-template').textContent);
+            container.innerHTML = addTmpl({ DefaultName: defaultName });
+            var dialog = container.querySelector('dialog');
+            if (dialog) dialog.showModal();
+            var input = document.getElementById('passkey-name-input');
+            if (input) input.focus();
+        }
+
+        function submitPasskeyRegistration(event, form) {
+            event.preventDefault();
+            var nameInput = document.getElementById('passkey-name-input');
+            var name = (nameInput && nameInput.value) ? nameInput.value.trim() : 'Admin Passkey';
+            var errEl = document.getElementById('passkey-reg-error');
+            var submitBtn = document.getElementById('passkey-reg-submit-btn');
+
+            if (errEl) errEl.style.display = 'none';
+            if (submitBtn) {
+                submitBtn.disabled = true;
+                submitBtn.textContent = 'Prompting device...';
+            }
+
+            fetch('api/auth/passkeys/begin', { method: 'POST' })
+                .then(function (res) {
+                    if (!res.ok) throw new Error('HTTP ' + res.status);
+                    return res.json();
+                })
+                .then(function (options) {
+                    options.challenge = base64URLToBuffer(options.challenge);
+                    options.user.id = base64URLToBuffer(options.user.id);
+                    if (options.excludeCredentials) {
+                        options.excludeCredentials.forEach(function (c) {
+                            c.id = base64URLToBuffer(c.id);
+                        });
+                    }
+                    return navigator.credentials.create({ publicKey: options });
+                })
+                .then(function (credential) {
+                    var payload = {
+                        name: name,
+                        id: credential.id,
+                        rawId: bufferToBase64URL(credential.rawId),
+                        type: credential.type,
+                        response: {
+                            clientDataJSON: bufferToBase64URL(credential.response.clientDataJSON),
+                            attestationObject: bufferToBase64URL(credential.response.attestationObject)
+                        }
+                    };
+                    return fetch('api/auth/passkeys/finish', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(payload)
+                    });
+                })
+                .then(function (res) {
+                    if (!res.ok) {
+                        return res.text().then(function (t) { throw new Error(t || 'Failed to save passkey'); });
+                    }
+                    return res.json();
+                })
+                .then(function (data) {
+                    closeModal();
+                    showToast('Passkey "' + name + '" registered successfully.');
+                    localStorage.setItem('wg_passkey_prompt_count', '3');
+                    var activeTab = document.querySelector('.tabs button.active');
+                    if (activeTab && activeTab.dataset.statsKind === 'server') {
+                        htmx.ajax('GET', 'server', { target: '#tab-content', swap: 'innerHTML' });
+                    }
+                    checkAuthAndPasskeys();
+                })
+                .catch(function (err) {
+                    if (errEl) {
+                        errEl.textContent = err.message || 'Passkey registration cancelled or failed.';
+                        errEl.style.display = 'block';
+                    }
+                    if (submitBtn) {
+                        submitBtn.disabled = false;
+                        submitBtn.textContent = 'Register Passkey';
+                    }
+                });
+        }
+
+        function handlePasskeyLogin() {
+            var errEl = document.getElementById('login-error-msg');
+            var btn = document.getElementById('login-btn');
+            if (errEl) errEl.style.display = 'none';
+            if (btn) {
+                btn.disabled = true;
+                btn.textContent = 'Prompting device...';
+            }
+
+            fetch('api/auth/login/begin', { method: 'POST' })
+                .then(function (res) {
+                    if (!res.ok) throw new Error('HTTP ' + res.status);
+                    return res.json();
+                })
+                .then(function (options) {
+                    options.challenge = base64URLToBuffer(options.challenge);
+                    if (options.allowCredentials) {
+                        options.allowCredentials.forEach(function (c) {
+                            c.id = base64URLToBuffer(c.id);
+                        });
+                    }
+                    return navigator.credentials.get({ publicKey: options });
+                })
+                .then(function (assertion) {
+                    var payload = {
+                        id: assertion.id,
+                        rawId: bufferToBase64URL(assertion.rawId),
+                        type: assertion.type,
+                        response: {
+                            clientDataJSON: bufferToBase64URL(assertion.response.clientDataJSON),
+                            authenticatorData: bufferToBase64URL(assertion.response.authenticatorData),
+                            signature: bufferToBase64URL(assertion.response.signature),
+                            userHandle: assertion.response.userHandle ? bufferToBase64URL(assertion.response.userHandle) : ''
+                        }
+                    };
+                    return fetch('api/auth/login/finish', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(payload)
+                    });
+                })
+                .then(function (res) {
+                    if (!res.ok) {
+                        return res.text().then(function (t) { throw new Error(t || 'Authentication failed'); });
+                    }
+                    return res.json();
+                })
+                .then(function () {
+                    showToast('Signed in successfully.');
+                    var activeTab = document.querySelector('.tabs button.active') || document.querySelector('.tabs button[data-stats-kind="peers"]');
+                    var getUrl = (activeTab && activeTab.getAttribute('hx-get')) || 'peers';
+                    htmx.ajax('GET', getUrl, { target: '#tab-content', swap: 'innerHTML' });
+                    checkAuthAndPasskeys();
+                })
+                .catch(function (err) {
+                    if (errEl) {
+                        errEl.textContent = err.message || 'Passkey authentication cancelled or failed.';
+                        errEl.style.display = 'block';
+                    }
+                    if (btn) {
+                        btn.disabled = false;
+                        btn.textContent = 'Sign In with Passkey';
+                    }
+                });
+        }
+
+        function handleLogout() {
+            fetch('api/auth/logout', { method: 'POST' })
+                .then(function () {
+                    showToast('Logged out.');
+                    checkAuthAndPasskeys();
+                })
+                .catch(function (err) {
+                    console.error('Logout error:', err);
+                });
+        }
+
+        function deletePasskey(id, name) {
+            if (!confirm('Delete passkey "' + name + '"?')) return;
+            fetch('api/auth/passkeys/' + encodeURIComponent(id), { method: 'DELETE', headers: { 'HX-Request': 'true' } })
+                .then(function (res) {
+                    if (!res.ok) throw new Error('HTTP ' + res.status);
+                    return res.json().catch(function() { return {}; });
+                })
+                .then(function () {
+                    showToast('Passkey "' + name + '" deleted.');
+                    htmx.ajax('GET', 'server', { target: '#tab-content', swap: 'innerHTML' });
+                    checkAuthAndPasskeys();
+                })
+                .catch(function (err) {
+                    showToast('Failed to delete passkey: ' + err.message);
+                });
+        }
+
         fetch('templates.html').then(function (response) {
             if (!response.ok) throw new Error('HTTP ' + response.status);
             return response.text();
@@ -430,6 +698,7 @@
             setTimeout(function () {
                 htmx.trigger(document.body, 'templates-ready');
                 updateActivityState();
+                checkAuthAndPasskeys();
             });
         }).catch(function (err) {
             showToast('Could not load UI templates: ' + err.message);

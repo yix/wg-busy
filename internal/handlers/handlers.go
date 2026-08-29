@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/yix/wg-busy/internal/auth"
 	"github.com/yix/wg-busy/internal/config"
 	"github.com/yix/wg-busy/internal/models"
 	"github.com/yix/wg-busy/internal/wgstats"
@@ -53,9 +54,11 @@ func writePageError(w http.ResponseWriter, status int, err error) {
 }
 
 type handler struct {
-	store *config.Store
-	stats *wgstats.Collector
-	zt    *zerotier.Supervisor
+	store    *config.Store
+	stats    *wgstats.Collector
+	zt       *zerotier.Supervisor
+	sessions *auth.SessionManager
+	webauthn *auth.WebAuthnService
 }
 
 // ztGatewayNets returns the ZeroTier on-link networks, or nil when ZeroTier is
@@ -208,9 +211,70 @@ func isCompressible(contentType string) bool {
 	return strings.HasPrefix(mediaType, "text/") || mediaType == "application/json" || mediaType == "application/javascript" || mediaType == "application/xml" || mediaType == "image/svg+xml"
 }
 
+// requireAuth checks whether passkey authentication is enforced and valid.
+func (h *handler) requireAuth(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var requirePasskey bool
+		var hasPasskeys bool
+		if h.store != nil {
+			h.store.Read(func(cfg *models.AppConfig) {
+				requirePasskey = cfg.Server.RequirePasskey
+				hasPasskeys = len(cfg.Server.Passkeys) > 0
+			})
+		}
+
+		if !requirePasskey || !hasPasskeys {
+			next.ServeHTTP(w, r)
+			return
+		}
+
+		path := r.URL.Path
+		if path == "/" ||
+			path == "/version" ||
+			path == "/favicon.ico" ||
+			strings.HasPrefix(path, "/favicon-options/") ||
+			path == "/index.css" ||
+			path == "/templates.html" ||
+			path == "/api/auth/status" ||
+			path == "/api/auth/login/begin" ||
+			path == "/api/auth/login/finish" ||
+			path == "/api/auth/logout" {
+			next.ServeHTTP(w, r)
+			return
+		}
+
+		if h.sessions.ValidateSession(r) {
+			next.ServeHTTP(w, r)
+			return
+		}
+
+		// Unauthenticated request
+		if r.Header.Get("HX-Request") == "true" {
+			writePageJSON(w, http.StatusUnauthorized, "login-card", struct{}{}, nil)
+			return
+		}
+		if strings.HasPrefix(path, "/api/") {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+
+		http.Redirect(w, r, "/", http.StatusSeeOther)
+	})
+}
+
 // NewRouter creates the HTTP mux with all routes registered.
 func NewRouter(store *config.Store, webFS fs.FS, stats *wgstats.Collector, zt *zerotier.Supervisor, version string) http.Handler {
-	h := &handler{store: store, stats: stats, zt: zt}
+	challenges := auth.NewChallengeStore()
+	sessions := auth.NewSessionManager()
+	webauthn := auth.NewWebAuthnService(challenges)
+
+	h := &handler{
+		store:    store,
+		stats:    stats,
+		zt:       zt,
+		sessions: sessions,
+		webauthn: webauthn,
+	}
 
 	mux := http.NewServeMux()
 
@@ -222,6 +286,15 @@ func NewRouter(store *config.Store, webFS fs.FS, stats *wgstats.Collector, zt *z
 
 	// Stats bar fragment (includes active-tab OOB stats selected by ?kind=).
 	mux.HandleFunc("GET /stats", h.GetCombinedStats)
+
+	// Auth endpoints.
+	mux.HandleFunc("GET /api/auth/status", h.GetAuthStatus)
+	mux.HandleFunc("POST /api/auth/login/begin", h.BeginLogin)
+	mux.HandleFunc("POST /api/auth/login/finish", h.FinishLogin)
+	mux.HandleFunc("POST /api/auth/logout", h.Logout)
+	mux.HandleFunc("POST /api/auth/passkeys/begin", h.BeginPasskeyRegistration)
+	mux.HandleFunc("POST /api/auth/passkeys/finish", h.FinishPasskeyRegistration)
+	mux.HandleFunc("DELETE /api/auth/passkeys/{id}", h.DeletePasskey)
 
 	// Peer fragment endpoints.
 	mux.HandleFunc("GET /peers", h.ListPeers)
@@ -266,5 +339,5 @@ func NewRouter(store *config.Store, webFS fs.FS, stats *wgstats.Collector, zt *z
 	mux.HandleFunc("POST /api/peers/{id}/regenerate-keys", h.RegeneratePeerKeys)
 	mux.HandleFunc("POST /api/zerotier/restart", h.RestartZeroTier)
 
-	return gzipResponses(logErrors(mux))
+	return gzipResponses(logErrors(h.requireAuth(mux)))
 }

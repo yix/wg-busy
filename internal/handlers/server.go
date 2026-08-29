@@ -52,6 +52,7 @@ func (h *handler) UpdateServerConfig(w http.ResponseWriter, r *http.Request) {
 		cfg.Server.PostUp = r.FormValue("postUp")
 		cfg.Server.PreDown = r.FormValue("preDown")
 		cfg.Server.PostDown = r.FormValue("postDown")
+		cfg.Server.RequirePasskey = r.FormValue("requirePasskey") == "on" || r.FormValue("requirePasskey") == "true"
 		// Capture what was submitted before validating: the store rolls its copy
 		// back on error, and the form has to show the user their own input.
 		data.Server = cfg.Server
@@ -78,6 +79,10 @@ func (h *handler) UpdateServerConfig(w http.ResponseWriter, r *http.Request) {
 		}
 		writePageJSON(w, http.StatusOK, "server-config", data, nil)
 		return
+	}
+
+	if data.Server.RequirePasskey {
+		h.sessions.CreateSession(w)
 	}
 
 	data.Success = "Configuration saved successfully."

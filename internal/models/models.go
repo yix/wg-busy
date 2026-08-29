@@ -10,6 +10,18 @@ import (
 	"time"
 )
 
+// Passkey represents a registered WebAuthn / FIDO2 credential for admin authentication.
+type Passkey struct {
+	ID         string     `yaml:"id" json:"id"`                 // Base64URL credential ID
+	Name       string     `yaml:"name" json:"name"`             // User-assigned label (e.g. "MacBook Pro Touch ID")
+	PublicKey  string     `yaml:"publicKey" json:"publicKey"`   // Base64URL-encoded public key bytes
+	Algorithm  int64      `yaml:"algorithm" json:"algorithm"`   // COSE algorithm identifier (-7: ES256, -257: RS256, -8: EdDSA)
+	SignCount  uint32     `yaml:"signCount" json:"signCount"`   // Monotonic signature counter
+	AAGUID     string     `yaml:"aaguid,omitempty" json:"aaguid,omitempty"`
+	CreatedAt  time.Time  `yaml:"createdAt" json:"createdAt"`
+	LastUsedAt *time.Time `yaml:"lastUsedAt,omitempty" json:"lastUsedAt,omitempty"`
+}
+
 // AppConfig is the top-level structure persisted to YAML.
 type AppConfig struct {
 	Server   ServerConfig   `yaml:"server"`
@@ -21,6 +33,7 @@ type AppConfig struct {
 // Clone returns an independent copy suitable for rollback and reconciliation.
 func (c AppConfig) Clone() AppConfig {
 	clone := c
+	clone.Server.Passkeys = append([]Passkey(nil), c.Server.Passkeys...)
 	clone.Peers = append([]Peer(nil), c.Peers...)
 	for i := range clone.Peers {
 		clone.Peers[i].ExitNodeRoutes = append([]string(nil), c.Peers[i].ExitNodeRoutes...)
@@ -73,7 +86,7 @@ func FindZeroTierNetwork(networks []ZeroTierNetwork, id string) *ZeroTierNetwork
 	return nil
 }
 
-// ServerConfig represents the [Interface] section of wg0.conf.
+// ServerConfig represents the [Interface] section of wg0.conf and server auth settings.
 type ServerConfig struct {
 	PrivateKey string `yaml:"privateKey"`
 	ListenPort uint16 `yaml:"listenPort"`
@@ -92,6 +105,9 @@ type ServerConfig struct {
 	BGPListenAddress string `yaml:"bgpListenAddress,omitempty"`
 	BGPListenPort    uint16 `yaml:"bgpListenPort,omitempty"`
 	BGPASN           uint32 `yaml:"bgpAsn,omitempty"`
+	// Admin Passkeys & Authentication
+	RequirePasskey bool      `yaml:"requirePasskey,omitempty"`
+	Passkeys       []Passkey `yaml:"passkeys,omitempty"`
 }
 
 // RouteFilter represents a single routing policy filter for BGP.
@@ -380,6 +396,29 @@ func (s *ServerConfig) Validate() ValidationErrors {
 		}
 		if s.BGPASN == 0 {
 			errs = append(errs, ValidationError{Field: "bgpAsn", Message: "required when BGP is enabled"})
+		}
+	}
+
+	if s.RequirePasskey && len(s.Passkeys) == 0 {
+		errs = append(errs, ValidationError{Field: "requirePasskey", Message: "cannot require passkey login when no passkeys are configured"})
+	}
+
+	seenPasskeyIDs := make(map[string]bool, len(s.Passkeys))
+	for i, pk := range s.Passkeys {
+		if strings.TrimSpace(pk.Name) == "" {
+			errs = append(errs, ValidationError{Field: fmt.Sprintf("passkeys[%d].name", i), Message: "required"})
+		} else if len(pk.Name) > 64 {
+			errs = append(errs, ValidationError{Field: fmt.Sprintf("passkeys[%d].name", i), Message: "maximum 64 characters"})
+		}
+		if strings.TrimSpace(pk.ID) == "" {
+			errs = append(errs, ValidationError{Field: fmt.Sprintf("passkeys[%d].id", i), Message: "required"})
+		} else if seenPasskeyIDs[pk.ID] {
+			errs = append(errs, ValidationError{Field: fmt.Sprintf("passkeys[%d].id", i), Message: "duplicate credential ID"})
+		} else {
+			seenPasskeyIDs[pk.ID] = true
+		}
+		if strings.TrimSpace(pk.PublicKey) == "" {
+			errs = append(errs, ValidationError{Field: fmt.Sprintf("passkeys[%d].publicKey", i), Message: "required"})
 		}
 	}
 

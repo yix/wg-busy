@@ -317,6 +317,54 @@ func TestBGPMaxPrefixLengthValidation(t *testing.T) {
 	}
 }
 
+func TestPasskeyValidation(t *testing.T) {
+	t.Run("require passkey without passkeys fails", func(t *testing.T) {
+		cfg := validConfig()
+		cfg.Server.RequirePasskey = true
+		errs := cfg.Server.Validate()
+		if !errs.HasField("requirePasskey") {
+			t.Fatalf("expected requirePasskey error, got %v", errs)
+		}
+	})
+
+	t.Run("require passkey with valid passkey succeeds", func(t *testing.T) {
+		cfg := validConfig()
+		cfg.Server.RequirePasskey = true
+		cfg.Server.Passkeys = []Passkey{
+			{ID: "cred-1", Name: "YubiKey", PublicKey: "base64pubkey"},
+		}
+		errs := cfg.Server.Validate()
+		if len(errs) > 0 {
+			t.Fatalf("unexpected validation errors: %v", errs)
+		}
+	})
+
+	t.Run("invalid passkey fields", func(t *testing.T) {
+		cfg := validConfig()
+		cfg.Server.Passkeys = []Passkey{
+			{ID: "", Name: "", PublicKey: ""},
+			{ID: "cred-2", Name: "Key 2", PublicKey: "pub2"},
+			{ID: "cred-2", Name: "Key 3 (dup ID)", PublicKey: "pub3"},
+		}
+		errs := cfg.Server.Validate()
+		if !errs.HasField("passkeys[0].name") || !errs.HasField("passkeys[0].id") || !errs.HasField("passkeys[0].publicKey") || !errs.HasField("passkeys[2].id") {
+			t.Fatalf("expected passkey field errors, got %v", errs)
+		}
+	})
+
+	t.Run("clone copies passkeys deeply", func(t *testing.T) {
+		cfg := validConfig()
+		cfg.Server.Passkeys = []Passkey{
+			{ID: "cred-1", Name: "Original", PublicKey: "pub1"},
+		}
+		clone := cfg.Clone()
+		clone.Server.Passkeys[0].Name = "Modified"
+		if cfg.Server.Passkeys[0].Name == "Modified" {
+			t.Fatalf("modifying clone modified original passkey")
+		}
+	})
+}
+
 func validConfig(peers ...Peer) AppConfig {
 	return AppConfig{
 		Server: ServerConfig{PrivateKey: testKey("A"), ListenPort: 51820, Address: "10.0.0.1/24"},
@@ -325,3 +373,4 @@ func validConfig(peers ...Peer) AppConfig {
 }
 
 func testKey(prefix string) string { return prefix + strings.Repeat("A", 42) + "=" }
+
